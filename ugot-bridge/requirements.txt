@@ -1,0 +1,5 @@
+# Danh sách thư viện phụ thuộc cho Cầu nối UGOT Robot trên Windows
+# Cài đặt bằng lệnh: python -m pip install -r requirements.txt
+
+websockets>=11.0.3
+requests>=2.28.0

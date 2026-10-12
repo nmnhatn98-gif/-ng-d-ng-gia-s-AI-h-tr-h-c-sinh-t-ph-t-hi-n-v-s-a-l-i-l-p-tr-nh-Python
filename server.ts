@@ -1,5 +1,7 @@
 import express from "express";
+import http from "http";
 import path from "path";
+import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -2027,7 +2029,775 @@ app.post("/api/run-code", async (req, res) => {
   });
 });
 
+// ==========================================
+// UGOT ROBOT RELAY & DEVICE MANAGEMENT BACKEND
+// ==========================================
+
+interface StoredUgotDevice {
+  deviceId: string;
+  name: string;
+  deviceToken: string;
+  ownerEmail: string;
+  allowedClasses: string[];
+  robotName: string;
+  robotIp: string;
+  pythonPath?: string;
+  pythonVersion?: string;
+  hasUgot?: boolean;
+  isOnline: boolean;
+  robotConnected: boolean;
+  stage1Passed: boolean;
+  stage2Passed: boolean;
+  stage1Output?: string;
+  stage2Output?: string;
+  acceptingSubmissions: boolean;
+  requireTeacherApproval: boolean;
+  currentLease?: {
+    holderId: string;
+    holderName: string;
+    holderRole: "teacher" | "student";
+    taskId?: string;
+    acquiredAt: number;
+    expiresAt: number;
+  } | null;
+  lastHeartbeat: number;
+  createdAt: string;
+}
+
+interface StoredPairingCode {
+  code: string;
+  teacherEmail: string;
+  teacherUid: string;
+  allowedClasses: string[];
+  robotIp: string;
+  robotName: string;
+  expiresAt: number;
+  attempts: number;
+  maxAttempts: number;
+  isUsed: boolean;
+  createdAt: string;
+}
+
+interface StoredUgotTask {
+  id: string;
+  deviceId: string;
+  robotIp: string;
+  studentId: string;
+  studentName: string;
+  studentClass: string;
+  type: "stage1_test" | "stage2_connect" | "stage3_run" | "stage3_stop";
+  code: string;
+  status: "pending_approval" | "queued" | "running" | "completed" | "error" | "cancelled" | "disconnected";
+  approvedByTeacher?: boolean;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  stdout: string;
+  stderr: string;
+  exitCode?: number | null;
+  robotStopped?: boolean;
+  stopConfirmed?: boolean;
+  stopMessage?: string;
+  error?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+const activeBridgeSockets = new Map<string, WebSocket>();
+const activeWebListeners = new Map<string, Set<WebSocket>>();
+
+function broadcastToWeb(deviceId: string, payload: any) {
+  const listeners = activeWebListeners.get(deviceId);
+  if (!listeners || listeners.size === 0) return;
+  const msgStr = JSON.stringify(payload);
+  const dead: WebSocket[] = [];
+  listeners.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(msgStr);
+      } catch (e) {
+        dead.push(ws);
+      }
+    } else {
+      dead.push(ws);
+    }
+  });
+  dead.forEach((ws) => listeners.delete(ws));
+}
+
+// 1. Get paired devices
+app.get("/api/ugot/devices", async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+    // Re-check online status from active socket map
+    const mapped = devices.map((d) => {
+      const isOnline = activeBridgeSockets.has(d.deviceId);
+      const isLeaseActive = d.currentLease && d.currentLease.expiresAt > Date.now();
+      return {
+        ...d,
+        isOnline,
+        currentLease: isLeaseActive ? d.currentLease : null,
+        deviceToken: user.role === "teacher" ? d.deviceToken : undefined, // Never leak deviceToken to students
+      };
+    });
+
+    if (user.role === "teacher") {
+      return res.json({ devices: mapped });
+    }
+
+    // For students: Only return devices allowed for their class or unassigned
+    const studentsVault = readJsonData<any[]>("students_vault.json", []);
+    const student = studentsVault.find((s) => s.uid === user.uid);
+    const studentClass = student?.classGrade || "";
+
+    const filtered = mapped.filter((d) => {
+      if (!d.allowedClasses || d.allowedClasses.length === 0 || d.allowedClasses.includes("all")) return true;
+      return d.allowedClasses.includes(studentClass);
+    });
+
+    return res.json({ devices: filtered });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tải danh sách robot: " + err.message });
+  }
+});
+
+// 2. Teacher creates pairing code
+app.post("/api/ugot/pair/create", async (req, res) => {
+  try {
+    const teacher = await requireTeacher(req, res);
+    if (!teacher) return;
+
+    const { robotIp, robotName, allowedClasses } = req.body;
+    const cleanIp = (robotIp || "192.168.7.88").trim();
+    const cleanName = (robotName || "UGOT-01").trim();
+    const classes = Array.isArray(allowedClasses) && allowedClasses.length > 0 ? allowedClasses : ["all"];
+
+    // Generate random 6-digit code
+    const rawNumber = Math.floor(100000 + Math.random() * 900000);
+    const code = `UG-${rawNumber}`;
+
+    const newPairing: StoredPairingCode = {
+      code,
+      teacherEmail: teacher.email,
+      teacherUid: teacher.uid,
+      allowedClasses: classes,
+      robotIp: cleanIp,
+      robotName: cleanName,
+      expiresAt: Date.now() + 15 * 60 * 1000, // 15 minutes
+      attempts: 0,
+      maxAttempts: 5,
+      isUsed: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    const pairings = readJsonData<StoredPairingCode[]>("ugot_pairings.json", []);
+    pairings.push(newPairing);
+    writeJsonData("ugot_pairings.json", pairings);
+
+    return res.json({
+      success: true,
+      code,
+      expiresInMinutes: 15,
+      expiresAt: newPairing.expiresAt,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tạo mã ghép nối: " + err.message });
+  }
+});
+
+// 3. Laptop bridge claims pairing code
+app.post("/api/ugot/pair/claim", async (req, res) => {
+  try {
+    const { code, deviceName, pythonPath, pythonVersion, hasUgot } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: "Thiếu mã ghép nối." });
+    }
+
+    const normCode = String(code).trim().toUpperCase();
+    const pairings = readJsonData<StoredPairingCode[]>("ugot_pairings.json", []);
+
+    const pairing = pairings.find(
+      (p) => (p.code === normCode || p.code.replace("UG-", "") === normCode) && !p.isUsed
+    );
+
+    if (!pairing) {
+      return res.status(404).json({
+        success: false,
+        error: "Mã ghép nối không tồn tại hoặc đã được sử dụng.",
+      });
+    }
+
+    if (Date.now() > pairing.expiresAt) {
+      return res.status(400).json({
+        success: false,
+        error: "Mã ghép nối đã hết hạn sau 15 phút. Vui lòng tạo mã mới trên LMS.",
+      });
+    }
+
+    if (pairing.attempts >= pairing.maxAttempts) {
+      return res.status(429).json({
+        success: false,
+        error: "Mã này đã vượt quá 5 lần thử tối đa vì lý do bảo mật.",
+      });
+    }
+
+    pairing.attempts += 1;
+
+    // Generate deviceId and unique secure deviceToken
+    const deviceId = `ugot-dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const deviceToken = `tok-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+
+    pairing.isUsed = true;
+    writeJsonData("ugot_pairings.json", pairings);
+
+    const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+    const newDevice: StoredUgotDevice = {
+      deviceId,
+      name: (deviceName || "Laptop Bridge").trim(),
+      deviceToken,
+      ownerEmail: pairing.teacherEmail,
+      allowedClasses: pairing.allowedClasses,
+      robotName: pairing.robotName,
+      robotIp: pairing.robotIp,
+      pythonPath: pythonPath || "",
+      pythonVersion: pythonVersion || "Python 3.x",
+      hasUgot: Boolean(hasUgot),
+      isOnline: false,
+      robotConnected: false,
+      stage1Passed: false,
+      stage2Passed: false,
+      acceptingSubmissions: true,
+      requireTeacherApproval: true,
+      currentLease: null,
+      lastHeartbeat: Date.now(),
+      createdAt: new Date().toISOString(),
+    };
+
+    devices.push(newDevice);
+    writeJsonData("ugot_devices.json", devices);
+
+    return res.json({
+      success: true,
+      deviceId,
+      deviceToken,
+      robotIp: pairing.robotIp,
+      robotName: pairing.robotName,
+      teacherEmail: pairing.teacherEmail,
+      allowedClasses: pairing.allowedClasses,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: "Lỗi ghép nối thiết bị: " + err.message });
+  }
+});
+
+// 4. Update / revoke device
+app.put("/api/ugot/devices/:deviceId", async (req, res) => {
+  try {
+    const teacher = await requireTeacher(req, res);
+    if (!teacher) return;
+
+    const { deviceId } = req.params;
+    const { name, robotIp, robotName, allowedClasses, acceptingSubmissions, requireTeacherApproval } = req.body;
+
+    const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+    const target = devices.find((d) => d.deviceId === deviceId);
+    if (!target) {
+      return res.status(404).json({ error: "Không tìm thấy thiết bị." });
+    }
+
+    if (name !== undefined) target.name = name;
+    if (robotIp !== undefined) target.robotIp = robotIp;
+    if (robotName !== undefined) target.robotName = robotName;
+    if (allowedClasses !== undefined) target.allowedClasses = allowedClasses;
+    if (acceptingSubmissions !== undefined) target.acceptingSubmissions = Boolean(acceptingSubmissions);
+    if (requireTeacherApproval !== undefined) target.requireTeacherApproval = Boolean(requireTeacherApproval);
+
+    writeJsonData("ugot_devices.json", devices);
+
+    // Notify bridge via WS if IP changed
+    const bridgeWs = activeBridgeSockets.get(deviceId);
+    if (bridgeWs && bridgeWs.readyState === WebSocket.OPEN && robotIp) {
+      bridgeWs.send(JSON.stringify({ type: "device:update_config", robotIp }));
+    }
+
+    return res.json({ success: true, device: target });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi cập nhật thiết bị: " + err.message });
+  }
+});
+
+// Delete / Revoke device
+app.delete("/api/ugot/devices/:deviceId", async (req, res) => {
+  try {
+    const teacher = await requireTeacher(req, res);
+    if (!teacher) return;
+
+    const { deviceId } = req.params;
+    const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+    const filtered = devices.filter((d) => d.deviceId !== deviceId);
+
+    writeJsonData("ugot_devices.json", filtered);
+
+    // Disconnect active bridge socket if connected
+    const bridgeWs = activeBridgeSockets.get(deviceId);
+    if (bridgeWs) {
+      bridgeWs.close(4001, "Thiết bị đã bị thu hồi quyền từ LMS");
+      activeBridgeSockets.delete(deviceId);
+    }
+
+    return res.json({ success: true, message: "Đã thu hồi thiết bị thành công." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi xóa thiết bị: " + err.message });
+  }
+});
+
+// 5. Submit / Run task on robot
+app.post("/api/ugot/tasks", async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { deviceId, type, code } = req.body;
+    if (!deviceId || !type) {
+      return res.status(400).json({ error: "Thiếu mã thiết bị (deviceId) hoặc loại tác vụ (type)." });
+    }
+
+    const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+    const device = devices.find((d) => d.deviceId === deviceId);
+    if (!device) {
+      return res.status(404).json({ error: "Không tìm thấy thiết bị cầu nối." });
+    }
+
+    // Permission check for student
+    let studentName = user.email.split("@")[0];
+    let studentClass = "";
+    if (user.role === "student") {
+      const studentsVault = readJsonData<any[]>("students_vault.json", []);
+      const st = studentsVault.find((s) => s.uid === user.uid);
+      studentName = st?.fullName || studentName;
+      studentClass = st?.classGrade || "";
+
+      if (device.allowedClasses && device.allowedClasses.length > 0 && !device.allowedClasses.includes("all")) {
+        if (!device.allowedClasses.includes(studentClass)) {
+          return res.status(403).json({ error: `Nhóm thiết bị này không mở cho lớp ${studentClass || "chưa xác định"}.` });
+        }
+      }
+
+      if (!device.acceptingSubmissions) {
+        return res.status(403).json({ error: "Giáo viên hiện đang tạm khóa nhận bài chạy cho thiết bị này." });
+      }
+
+      // Check robot lease
+      if (type === "stage3_run") {
+        if (device.currentLease && device.currentLease.expiresAt > Date.now()) {
+          if (device.currentLease.holderId !== user.uid) {
+            return res.status(409).json({
+              error: `Robot hiện đang được cấp quyền cho bạn ${device.currentLease.holderName}. Vui lòng chờ đến lượt hoặc xin phép giáo viên.`,
+            });
+          }
+        }
+      }
+    } else {
+      studentName = `Giáo viên (${user.email})`;
+    }
+
+    const taskId = `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const isApprovalNeeded = user.role === "student" && type === "stage3_run" && device.requireTeacherApproval;
+
+    let taskCode = code || "";
+    if (type === "stage1_test") {
+      taskCode = `import sys\nprint("Kết nối Python trên laptop thành công")\nprint(f"Phiên bản Python: {sys.version.split()[0]}")\ntry:\n    from ugot import ugot\n    print("Import thư viện ugot thành công!")\nexcept ImportError as e:\n    print(f"Chưa cài thư viện ugot: {e}")\n`;
+    } else if (type === "stage2_connect") {
+      taskCode = `import sys\nimport time\ntry:\n    from ugot import ugot\n    print(f"Bắt đầu khởi tạo kết nối Robot UGOT tại IP: {repr('${device.robotIp}')}...")\n    rb = ugot.UGOT()\n    ret = rb.initialize("${device.robotIp}")\n    print(f"Kết quả rb.initialize(): {ret}")\n    time.sleep(1)\n    print("✅ Kiểm tra kết nối robot phản hồi thành công!")\nexcept Exception as e:\n    print(f"❌ Lỗi kết nối robot: {e}")\n    sys.exit(1)\n`;
+    }
+
+    const newTask: StoredUgotTask = {
+      id: taskId,
+      deviceId,
+      robotIp: device.robotIp,
+      studentId: user.uid,
+      studentName,
+      studentClass,
+      type,
+      code: taskCode,
+      status: isApprovalNeeded ? "pending_approval" : "queued",
+      approvedByTeacher: !isApprovalNeeded,
+      stdout: "",
+      stderr: "",
+      createdAt: new Date().toISOString(),
+    };
+
+    const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+    tasks.push(newTask);
+    writeJsonData("ugot_tasks.json", tasks);
+
+    // If teacher or doesn't need approval, dispatch immediately to bridge
+    if (!isApprovalNeeded) {
+      const bridgeWs = activeBridgeSockets.get(deviceId);
+      if (bridgeWs && bridgeWs.readyState === WebSocket.OPEN) {
+        // Grant lease for 60 seconds
+        device.currentLease = {
+          holderId: user.uid,
+          holderName: studentName,
+          holderRole: user.role,
+          taskId,
+          acquiredAt: Date.now(),
+          expiresAt: Date.now() + 60 * 1000,
+        };
+        writeJsonData("ugot_devices.json", devices);
+
+        bridgeWs.send(
+          JSON.stringify({
+            type: "task:dispatch",
+            task: {
+              id: taskId,
+              type,
+              code: taskCode,
+              robotIp: device.robotIp,
+            },
+          })
+        );
+      } else {
+        newTask.status = "disconnected";
+        newTask.stderr = "Cầu nối laptop hiện đang ngoại tuyến. Vui lòng mở start_bridge.bat trên laptop.";
+        writeJsonData("ugot_tasks.json", tasks);
+      }
+    }
+
+    broadcastToWeb(deviceId, { type: "task:created", task: newTask });
+
+    return res.json({
+      success: true,
+      task: newTask,
+      requiresApproval: isApprovalNeeded,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi gửi tác vụ: " + err.message });
+  }
+});
+
+// 6. Stop robot execution emergency
+app.post("/api/ugot/tasks/:taskId/stop", async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { taskId } = req.params;
+    const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return res.status(404).json({ error: "Không tìm thấy tác vụ." });
+    }
+
+    // Permission check
+    if (user.role !== "teacher" && task.studentId !== user.uid) {
+      return res.status(403).json({ error: "Bạn chỉ có thể dừng tác vụ của chính mình." });
+    }
+
+    task.status = "cancelled";
+    task.stopConfirmed = false;
+    task.stopMessage = "Đang gửi lệnh dừng...";
+    writeJsonData("ugot_tasks.json", tasks);
+
+    const bridgeWs = activeBridgeSockets.get(task.deviceId);
+    if (bridgeWs && bridgeWs.readyState === WebSocket.OPEN) {
+      bridgeWs.send(
+        JSON.stringify({
+          type: "task:stop",
+          taskId,
+        })
+      );
+    }
+
+    // Release lease
+    const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+    const dev = devices.find((d) => d.deviceId === task.deviceId);
+    if (dev) {
+      dev.currentLease = null;
+      writeJsonData("ugot_devices.json", devices);
+    }
+
+    broadcastToWeb(task.deviceId, {
+      type: "task:status",
+      taskId,
+      status: "cancelled",
+      stopMessage: "Đã yêu cầu dừng khẩn cấp từ website.",
+    });
+
+    return res.json({ success: true, message: "Đã gửi lệnh dừng tới cầu nối laptop." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi dừng robot: " + err.message });
+  }
+});
+
+// 7. Teacher approve / reject task
+app.post("/api/ugot/tasks/:taskId/approve", async (req, res) => {
+  try {
+    const teacher = await requireTeacher(req, res);
+    if (!teacher) return;
+
+    const { taskId } = req.params;
+    const { approved } = req.body;
+
+    const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return res.status(404).json({ error: "Không tìm thấy tác vụ." });
+
+    task.reviewedBy = teacher.email;
+    task.reviewedAt = new Date().toISOString();
+
+    if (approved) {
+      task.approvedByTeacher = true;
+      task.status = "queued";
+
+      const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+      const dev = devices.find((d) => d.deviceId === task.deviceId);
+      const bridgeWs = activeBridgeSockets.get(task.deviceId);
+
+      if (bridgeWs && bridgeWs.readyState === WebSocket.OPEN && dev) {
+        dev.currentLease = {
+          holderId: task.studentId,
+          holderName: task.studentName,
+          holderRole: "student",
+          taskId,
+          acquiredAt: Date.now(),
+          expiresAt: Date.now() + 60 * 1000,
+        };
+        writeJsonData("ugot_devices.json", devices);
+
+        bridgeWs.send(
+          JSON.stringify({
+            type: "task:dispatch",
+            task: {
+              id: task.id,
+              type: task.type,
+              code: task.code,
+              robotIp: task.robotIp,
+            },
+          })
+        );
+      } else {
+        task.status = "disconnected";
+        task.stderr = "Cầu nối ngoại tuyến khi giáo viên duyệt.";
+      }
+    } else {
+      task.approvedByTeacher = false;
+      task.status = "cancelled";
+      task.stderr = "Giáo viên không phê duyệt chạy mã nguồn này.";
+    }
+
+    writeJsonData("ugot_tasks.json", tasks);
+    broadcastToWeb(task.deviceId, { type: "task:status", taskId, status: task.status });
+
+    return res.json({ success: true, task });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi duyệt bài: " + err.message });
+  }
+});
+
+// 8. Get tasks history
+app.get("/api/ugot/tasks", async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const deviceId = req.query.deviceId as string | undefined;
+    const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+
+    let filtered = tasks;
+    if (deviceId) {
+      filtered = filtered.filter((t) => t.deviceId === deviceId);
+    }
+    if (user.role === "student") {
+      filtered = filtered.filter((t) => t.studentId === user.uid);
+    }
+
+    // Limit last 50 tasks
+    const sorted = filtered.slice(-50).reverse();
+    return res.json({ tasks: sorted });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tải lịch sử tác vụ: " + err.message });
+  }
+});
+
 async function startServer() {
+  const server = http.createServer(app);
+
+  // Attach WebSocket Relay Server on /ws/ugot-relay
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (request, socket, head) => {
+    const pathname = request.url ? request.url.split("?")[0] : "";
+    if (pathname === "/ws/ugot-relay") {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+
+  wss.on("connection", (ws: WebSocket, request: http.IncomingMessage) => {
+    const parsedUrl = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
+    const clientType = parsedUrl.searchParams.get("type") || "web";
+    const deviceId = parsedUrl.searchParams.get("deviceId") || "default";
+    const token = parsedUrl.searchParams.get("token") || "";
+
+    if (clientType === "bridge") {
+      // Validate device token
+      const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+      const dev = devices.find((d) => d.deviceId === deviceId && d.deviceToken === token);
+      if (!dev) {
+        ws.close(4003, "Token xác thực cầu nối không hợp lệ");
+        return;
+      }
+
+      activeBridgeSockets.set(deviceId, ws);
+      dev.isOnline = true;
+      dev.lastHeartbeat = Date.now();
+      writeJsonData("ugot_devices.json", devices);
+
+      console.log(`🟢 [UGOT BRIDGE CONNECTED] Device ID: ${deviceId} (${dev.name})`);
+      broadcastToWeb(deviceId, { type: "bridge:online", deviceId });
+
+      ws.on("message", (raw) => {
+        try {
+          const data = JSON.parse(raw.toString());
+          const msgType = data.type;
+
+          if (msgType === "bridge:hello") {
+            const currentDevs = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+            const curDev = currentDevs.find((d) => d.deviceId === deviceId);
+            if (curDev) {
+              curDev.pythonPath = data.pythonPath || curDev.pythonPath;
+              curDev.pythonVersion = data.pythonVersion || curDev.pythonVersion;
+              curDev.hasUgot = Boolean(data.hasUgot);
+              curDev.robotIp = data.robotIp || curDev.robotIp;
+              curDev.isOnline = true;
+              writeJsonData("ugot_devices.json", currentDevs);
+            }
+            broadcastToWeb(deviceId, { type: "bridge:info", deviceId, data });
+          } else if (msgType === "task:status") {
+            const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+            const t = tasks.find((x) => x.id === data.taskId);
+            if (t) {
+              t.status = data.status;
+              if (data.status === "running") t.startedAt = new Date().toISOString();
+              writeJsonData("ugot_tasks.json", tasks);
+            }
+            broadcastToWeb(deviceId, data);
+          } else if (msgType === "task:update") {
+            const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+            const t = tasks.find((x) => x.id === data.taskId);
+            if (t) {
+              if (data.stream === "stdout") t.stdout = (t.stdout || "") + data.chunk;
+              if (data.stream === "stderr") t.stderr = (t.stderr || "") + data.chunk;
+              writeJsonData("ugot_tasks.json", tasks);
+            }
+            broadcastToWeb(deviceId, data);
+          } else if (msgType === "task:completed") {
+            const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+            const t = tasks.find((x) => x.id === data.taskId);
+            if (t) {
+              t.status = data.status || "completed";
+              t.exitCode = data.exitCode;
+              t.robotStopped = data.robotStopped;
+              t.stopConfirmed = data.stopConfirmed;
+              t.stopMessage = data.stopMessage;
+              t.completedAt = new Date().toISOString();
+              writeJsonData("ugot_tasks.json", tasks);
+
+              // Update device stage records if this was a test
+              if (t.type === "stage1_test" && data.exitCode === 0) {
+                const devs = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+                const devItem = devs.find((d) => d.deviceId === deviceId);
+                if (devItem) {
+                  devItem.stage1Passed = true;
+                  devItem.stage1Output = t.stdout;
+                  writeJsonData("ugot_devices.json", devs);
+                }
+              } else if (t.type === "stage2_connect" && data.exitCode === 0) {
+                const devs = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+                const devItem = devs.find((d) => d.deviceId === deviceId);
+                if (devItem) {
+                  devItem.stage2Passed = true;
+                  devItem.robotConnected = true;
+                  devItem.stage2Output = t.stdout;
+                  writeJsonData("ugot_devices.json", devs);
+                }
+              }
+            }
+
+            // Clear current lease
+            const currentDevs = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+            const curDev = currentDevs.find((d) => d.deviceId === deviceId);
+            if (curDev) {
+              curDev.currentLease = null;
+              writeJsonData("ugot_devices.json", currentDevs);
+            }
+
+            broadcastToWeb(deviceId, data);
+          } else if (msgType === "task:stopped") {
+            const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
+            const t = tasks.find((x) => x.id === data.taskId);
+            if (t) {
+              t.stopConfirmed = data.stopConfirmed;
+              t.stopMessage = data.stopMessage;
+              writeJsonData("ugot_tasks.json", tasks);
+            }
+            broadcastToWeb(deviceId, data);
+          }
+        } catch (e) {
+          console.warn("Lỗi xử lý tin nhắn từ cầu nối:", e);
+        }
+      });
+
+      ws.on("close", () => {
+        if (activeBridgeSockets.get(deviceId) === ws) {
+          activeBridgeSockets.delete(deviceId);
+          const currentDevs = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+          const curDev = currentDevs.find((d) => d.deviceId === deviceId);
+          if (curDev) {
+            curDev.isOnline = false;
+            curDev.robotConnected = false;
+            curDev.currentLease = null;
+            writeJsonData("ugot_devices.json", currentDevs);
+          }
+          console.log(`🔴 [UGOT BRIDGE DISCONNECTED] Device ID: ${deviceId}`);
+          broadcastToWeb(deviceId, { type: "bridge:offline", deviceId });
+        }
+      });
+    } else {
+      // Web browser client
+      if (!activeWebListeners.has(deviceId)) {
+        activeWebListeners.set(deviceId, new Set());
+      }
+      activeWebListeners.get(deviceId)!.add(ws);
+
+      // Send current device status immediately
+      const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
+      const dev = devices.find((d) => d.deviceId === deviceId);
+      const isOnline = activeBridgeSockets.has(deviceId);
+      ws.send(
+        JSON.stringify({
+          type: "bridge:status",
+          deviceId,
+          isOnline,
+          robotConnected: Boolean(dev?.robotConnected),
+          stage1Passed: Boolean(dev?.stage1Passed),
+          stage2Passed: Boolean(dev?.stage2Passed),
+        })
+      );
+
+      ws.on("close", () => {
+        activeWebListeners.get(deviceId)?.delete(ws);
+      });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -2042,8 +2812,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running with WebSocket Relay on http://0.0.0.0:${PORT}`);
   });
 }
 

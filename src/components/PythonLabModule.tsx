@@ -11,6 +11,7 @@ import {
   StudentReflection 
 } from "../types";
 import { executeCodeHybrid, PYTHON_RUNTIME_COMPATIBILITY_INFO } from "../lib/pythonRunner";
+import { UgotPracticePanel } from "./UgotPracticePanel";
 import { 
   Play, 
   RotateCcw, 
@@ -237,6 +238,9 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   onBack,
   onSubmitWork,
 }) => {
+  // Environment mode: "browser" (In-browser Pyodide/Skulpt) vs "ugot" (Robot UGOT trên laptop Windows)
+  const [activeEnvironment, setActiveEnvironment] = useState<"browser" | "ugot">("browser");
+
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>("arithmetic_gdpt");
   const [code, setCode] = useState<string>(PYTHON_TEMPLATES.arithmetic_gdpt.code);
   const [stdinInput, setStdinInput] = useState<string>(PYTHON_TEMPLATES.arithmetic_gdpt.sampleInput);
@@ -694,31 +698,58 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-sm text-white tracking-tight">Khu Lập Trình Python 3</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/50">
-                  Sandbox Tự Do
-                </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
-                Thực hành gõ code, chạy thử input/output & có Gia sư AI đồng hành
+                Thực hành gõ code, gỡ lỗi & điều khiển robot UGOT
               </p>
             </div>
           </div>
 
-          {/* Template Selector Dropdown */}
-          <div className="hidden md:flex items-center gap-1.5 ml-3 pl-3 border-l border-slate-800">
-            <span className="text-[11px] font-bold text-slate-400">Mẫu code:</span>
-            <select
-              value={selectedTemplateKey}
-              onChange={(e) => handleSelectTemplate(e.target.value)}
-              className="bg-slate-800 text-xs font-semibold text-amber-300 border border-slate-700 rounded-lg px-2.5 py-1 focus:outline-none focus:border-amber-500 transition-colors"
+          {/* TWO CLEAR ENVIRONMENTS TOGGLE */}
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 ml-2">
+            <button
+              type="button"
+              onClick={() => setActiveEnvironment("browser")}
+              className={`min-h-[32px] px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeEnvironment === "browser"
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "text-slate-400 hover:text-white"
+              }`}
             >
-              {Object.entries(PYTHON_TEMPLATES).map(([key, item]) => (
-                <option key={key} value={key} className="bg-slate-900 text-slate-200">
-                  [{item.category}] {item.name}
-                </option>
-              ))}
-            </select>
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Python trong trình duyệt</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveEnvironment("ugot")}
+              className={`min-h-[32px] px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeEnvironment === "ugot"
+                  ? "bg-indigo-600 text-white shadow-xs"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>UGOT trên laptop Windows</span>
+            </button>
           </div>
+
+          {/* Template Selector Dropdown (When in browser mode) */}
+          {activeEnvironment === "browser" && (
+            <div className="hidden lg:flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-800">
+              <span className="text-[11px] font-bold text-slate-400">Mẫu:</span>
+              <select
+                value={selectedTemplateKey}
+                onChange={(e) => handleSelectTemplate(e.target.value)}
+                className="bg-slate-800 text-xs font-semibold text-amber-300 border border-slate-700 rounded-lg px-2.5 py-1 focus:outline-none focus:border-amber-500 transition-colors"
+              >
+                {Object.entries(PYTHON_TEMPLATES).map(([key, item]) => (
+                  <option key={key} value={key} className="bg-slate-900 text-slate-200">
+                    [{item.category}] {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Right side: Actions (Run, Reset, Copy, Download, AI) */}
@@ -811,8 +842,13 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
         </div>
       </header>
 
-      {/* Mobile Tab Navigation Bar (< 768px) */}
-      <div className="md:hidden flex items-center bg-slate-900 border-b border-slate-800 shrink-0 px-2 py-1 gap-1">
+      {/* Active Environment: In-browser Python vs UGOT Robot on Windows */}
+      {activeEnvironment === "ugot" ? (
+        <UgotPracticePanel currentUser={currentUser} />
+      ) : (
+        <>
+          {/* Mobile Tab Navigation Bar (< 768px) */}
+          <div className="md:hidden flex items-center bg-slate-900 border-b border-slate-800 shrink-0 px-2 py-1 gap-1">
         <button
           type="button"
           onClick={() => setMobileLabTab("code")}
@@ -1494,6 +1530,8 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

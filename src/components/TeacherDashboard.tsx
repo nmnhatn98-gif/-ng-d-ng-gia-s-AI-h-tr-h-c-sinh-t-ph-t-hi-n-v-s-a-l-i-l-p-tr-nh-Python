@@ -41,12 +41,14 @@ import {
   HelpCircle,
   Save,
   ShieldCheck,
-  HardDrive
+  HardDrive,
+  Cpu
 } from "lucide-react";
 import { ExamCreationSystem } from "./ExamCreationSystem";
 import { StudentAccountManager } from "./StudentAccountManager";
 import { CreateClassModal } from "./CreateClassModal";
 import { CreateAssignmentModal } from "./CreateAssignmentModal";
+import { TeacherUgotManager } from "./TeacherUgotManager";
 import { getStoredStudents } from "../data/studentService";
 import { auth } from "../firebase";
 
@@ -67,7 +69,7 @@ interface TeacherDashboardProps {
   onOpenHtmlLab?: () => void;
 }
 
-type MainNavTab = "overview" | "classes" | "assignments" | "grading" | "reports" | "settings";
+type MainNavTab = "overview" | "classes" | "assignments" | "grading" | "reports" | "ugot-bridge" | "settings";
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   lessons,
@@ -528,6 +530,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               icon: CheckSquare,
               badge: pendingCount > 0 ? pendingCount : undefined 
             },
+            { id: "ugot-bridge" as MainNavTab, label: "Robot UGOT", icon: Cpu },
             { id: "reports" as MainNavTab, label: "Báo cáo", icon: BarChart3 },
           ].map((item) => {
             const Icon = item.icon;
@@ -615,6 +618,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 { id: "classes" as MainNavTab, label: "Lớp học", icon: School },
                 { id: "assignments" as MainNavTab, label: "Bài tập", icon: FileText },
                 { id: "grading" as MainNavTab, label: "Chấm bài", icon: CheckSquare, badge: pendingCount > 0 ? pendingCount : undefined },
+                { id: "ugot-bridge" as MainNavTab, label: "Robot UGOT", icon: Cpu },
                 { id: "reports" as MainNavTab, label: "Báo cáo", icon: BarChart3 },
                 { id: "settings" as MainNavTab, label: "Cài đặt & dữ liệu", icon: Settings },
               ].map((item) => {
@@ -1982,6 +1986,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* ============================================================== */}
+            {/* VIEW: QUẢN LÝ ROBOT UGOT & CẦU NỐI LAPTOP */}
+            {/* ============================================================== */}
+            {activeNav === "ugot-bridge" && currentUser && (
+              <TeacherUgotManager currentUser={currentUser} />
             )}
 
           </div>

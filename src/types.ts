@@ -223,3 +223,89 @@ export interface CurriculumTopic {
   recommendedLab?: "python" | "html" | "scratch" | "general";
   labActionText?: string;
 }
+
+// ==========================================
+// UGOT ROBOT BRIDGE & REAL-TIME TYPES
+// ==========================================
+
+export type UgotTaskStatus =
+  | "pending_approval"
+  | "queued"
+  | "running"
+  | "completed"
+  | "error"
+  | "cancelled"
+  | "disconnected";
+
+export interface UgotLease {
+  holderId: string;
+  holderName: string;
+  holderRole: "teacher" | "student";
+  taskId?: string;
+  acquiredAt: number;
+  expiresAt: number;
+}
+
+export interface UgotDevice {
+  deviceId: string;
+  name: string;
+  ownerEmail: string;
+  allowedClasses: string[];
+  robotName: string;
+  robotIp: string;
+  robotModel?: string;
+  pythonPath?: string;
+  pythonVersion?: string;
+  ugotVersion?: string;
+  isOnline: boolean;
+  robotConnected: boolean;
+  stage1Passed: boolean;
+  stage2Passed: boolean;
+  stage1Output?: string;
+  stage2Output?: string;
+  acceptingSubmissions: boolean;
+  requireTeacherApproval: boolean;
+  currentLease?: UgotLease | null;
+  lastHeartbeat: number;
+  createdAt: string;
+}
+
+export interface UgotPairingCode {
+  code: string;
+  teacherEmail: string;
+  teacherUid: string;
+  allowedClasses: string[];
+  robotIp: string;
+  robotName: string;
+  expiresAt: number;
+  attempts: number;
+  maxAttempts: number;
+  isUsed: boolean;
+  createdAt: string;
+}
+
+export interface UgotTask {
+  id: string;
+  deviceId: string;
+  robotIp: string;
+  studentId: string;
+  studentName: string;
+  studentClass: string;
+  type: "stage1_test" | "stage2_connect" | "stage3_run" | "stage3_stop";
+  code: string;
+  status: UgotTaskStatus;
+  approvedByTeacher?: boolean;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  stdout: string;
+  stderr: string;
+  exitCode?: number | null;
+  robotStopped?: boolean;
+  stopConfirmed?: boolean;
+  stopMessage?: string;
+  error?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+

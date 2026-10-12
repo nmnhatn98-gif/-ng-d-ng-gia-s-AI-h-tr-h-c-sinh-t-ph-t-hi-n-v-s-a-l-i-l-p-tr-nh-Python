@@ -38,10 +38,15 @@ service cloud.firestore {
       allow write: if isTeacher();
     }
 
-    // Lessons collection
+    // Lessons collection (Học sinh đọc câu hỏi công khai, không chứa đáp án)
     match /lessons/{lessonId} {
       allow read: if true;
       allow write: if isTeacher();
+    }
+
+    // Lesson Keys (Đáp án bảo mật, giải thích, bài giải & test ẩn: CHỈ GIÁO VIÊN ĐƯỢC ĐỌC/GHI)
+    match /lesson_keys/{lessonId} {
+      allow read, write: if isTeacher();
     }
 
     // Submissions collection

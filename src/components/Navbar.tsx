@@ -148,7 +148,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={() => setIsPracticeMenuOpen((prev) => !prev)}
                   className={`min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
-                    activeTab === "python-lab" || activeTab === "html-lab"
+                    activeTab === "python-lab" || activeTab === "html-lab" || activeTab === "ugot-lab"
                       ? "bg-blue-50 text-blue-700 font-semibold"
                       : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                   }`}
@@ -164,7 +164,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="fixed inset-0 z-30"
                       onClick={() => setIsPracticeMenuOpen(false)}
                     />
-                    <div className="absolute left-0 mt-1.5 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 animate-fade-in">
+                    <div className="absolute left-0 mt-1.5 w-60 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 animate-fade-in">
                       <button
                         type="button"
                         onClick={() => {
@@ -179,8 +179,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <Code2 className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="font-semibold text-slate-900">Python</div>
+                          <div className="font-semibold text-slate-900">Python 3</div>
                           <div className="text-[11px] text-slate-500">Chạy thử và gỡ lỗi code</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPracticeMenuOpen(false);
+                          setActiveTab("ugot-lab");
+                        }}
+                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer min-h-[44px] ${
+                          activeTab === "ugot-lab" ? "text-indigo-600 font-semibold bg-indigo-50/50" : "text-slate-700"
+                        }`}
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                          <Cpu className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900">Robot UGOT</div>
+                          <div className="text-[11px] text-slate-500">Cầu nối WSS Windows Laptop</div>
                         </div>
                       </button>
 
@@ -540,8 +559,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <Code2 className="w-5 h-5 text-emerald-600 shrink-0" />
                     <div>
-                      <div className="font-medium text-slate-900">Phòng thực hành Python</div>
+                      <div className="font-medium text-slate-900">Phòng thực hành Python 3</div>
                       <div className="text-[11px] text-slate-500">Chạy thử và gỡ lỗi code</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("ugot-lab");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer text-left ${
+                      activeTab === "ugot-lab"
+                        ? "bg-indigo-50 text-indigo-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Cpu className="w-5 h-5 text-indigo-600 shrink-0" />
+                    <div>
+                      <div className="font-medium text-slate-900">Robot UGOT Laptop</div>
+                      <div className="text-[11px] text-slate-500">Cầu nối WSS Windows Laptop</div>
                     </div>
                   </button>
 

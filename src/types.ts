@@ -23,12 +23,25 @@ export interface QuizQuestion {
   id: string;
   question: string;
   options: string[];
-  correctIndex: number;
-  explanation: string;
+  correctIndex?: number; // Chỉ có trên phiên giáo viên hoặc máy chủ bảo vệ (bảo mật tuyệt đối)
+  explanation?: string;  // Chỉ trả về khi bài nộp đã được chấm và chính sách bài cho phép
   image?: string;
   level?: "nhan_biet" | "thong_hieu" | "van_dung" | "van_dung_cao";
   points?: number;
   topic?: string;
+}
+
+export interface LessonKeyItem {
+  id: string;
+  correctIndex: number;
+  explanation: string;
+}
+
+export interface LessonSolutionKey {
+  lessonId: string;
+  quizKeys?: LessonKeyItem[];
+  hiddenTestcases?: TestCase[];
+  updatedAt: string;
 }
 
 export interface TestCase {

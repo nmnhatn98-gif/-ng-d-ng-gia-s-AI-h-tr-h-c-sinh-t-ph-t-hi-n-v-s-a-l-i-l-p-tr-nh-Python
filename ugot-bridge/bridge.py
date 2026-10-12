@@ -342,6 +342,8 @@ class UgotBridge:
         self.current_task_type: Optional[str] = None
         self.is_connected = False
         self.stop_requested = False
+        self.task_lock = asyncio.Lock()
+        self.seen_task_ids: set = set()
 
     def get_ws_url(self) -> str:
         """Chuyển http(s) thành ws(s) và thêm tham số xác thực."""
@@ -355,24 +357,8 @@ class UgotBridge:
 
         return f"{ws_base}/ws/ugot-relay?type=bridge&deviceId={self.device_id}&token={self.device_token}"
 
-    def emergency_stop_robot(self) -> Dict[str, Any]:
-        """Thực thi dừng khẩn cấp: Hủy tiến trình con và gọi rb.transform_stop() độc lập."""
-        print("\n🚨 [KHẨN CẤP] ĐANG GỬI LỆNH DỪNG ROBOT VÀ TIẾN TRÌNH...")
-        self.stop_requested = True
-
-        # 1. Kill tiến trình học sinh nếu đang chạy
-        if self.current_process and self.current_process.poll() is None:
-            try:
-                self.current_process.terminate()
-                try:
-                    self.current_process.wait(timeout=1.5)
-                except subprocess.TimeoutExpired:
-                    self.current_process.kill()
-                print("   -> Đã dừng tiến trình Python của học sinh.")
-            except Exception as e:
-                print(f"   -> Lỗi khi dừng tiến trình con: {e}")
-
-        # 2. Tạo tiến trình dừng robot riêng biệt qua SDK ugot
+    def send_stop_command(self) -> Dict[str, Any]:
+        """Gửi lệnh dừng robot qua rb.transform_stop() mà không đánh dấu stop_requested (dùng cho kết thúc bình thường)."""
         stop_script = f"""
 import sys
 import time
@@ -390,6 +376,7 @@ except Exception as e:
     print(f"STOP_ERR: {{e}}")
 """
         stop_confirmed = False
+        stop_command_sent = True
         msg = ""
 
         try:
@@ -405,157 +392,188 @@ except Exception as e:
                 msg = "Đã xác nhận robot dừng (rb.transform_stop() thành công)."
                 print(f"   ✅ {msg}")
             else:
-                msg = f"Chưa xác nhận dừng qua mạng (Phản hồi: {output.strip()}). Hãy gạt công tắc vật lý trên robot!"
+                msg = f"Đã gửi lệnh dừng nhưng chưa xác nhận phản hồi ({output.strip()})."
                 print(f"   ⚠️ {msg}")
         except Exception as e:
-            msg = f"Chưa xác nhận dừng (Lỗi: {e}). Hãy ngắt nguồn hoặc gạt công tắc vật lý trên robot!"
+            stop_command_sent = False
+            msg = f"Chưa thể gửi lệnh dừng qua SDK ({e}). Hãy gạt công tắc trên robot!"
             print(f"   ⚠️ {msg}")
 
         return {
+            "stopCommandSent": stop_command_sent,
             "stopConfirmed": stop_confirmed,
             "message": msg
         }
 
-    async def execute_task(self, ws, task_data: Dict[str, Any]):
-        """Thực thi một tác vụ (Stage 1, Stage 2, hoặc Stage 3)."""
-        task_id = task_data.get("id")
-        task_type = task_data.get("type", "stage3_run")
-        code = task_data.get("code", "")
-        robot_ip = task_data.get("robotIp", self.robot_ip)
+    def emergency_stop_robot(self) -> Dict[str, Any]:
+        """Thực thi dừng khẩn cấp: Hủy tiến trình con, đánh dấu stop_requested và gọi lệnh dừng robot."""
+        print("\n🚨 [KHẨN CẤP] ĐANG GỬI LỆNH DỪNG ROBOT VÀ TIẾN TRÌNH...")
+        self.stop_requested = True
 
-        self.current_task_id = task_id
-        self.current_task_type = task_type
-        self.stop_requested = False
-
-        print(f"\n▶ Bắt đầu tác vụ [{task_type}] ID: {task_id}")
-        await ws.send(json.dumps({
-            "type": "task:status",
-            "taskId": task_id,
-            "status": "running"
-        }))
-
-        # Tạo thư mục làm việc riêng biệt (temporary directory)
-        temp_dir = tempfile.mkdtemp(prefix=f"ugot_{task_id[:8]}_")
-        script_file = os.path.join(temp_dir, "run_task.py")
-
-        try:
-            with open(script_file, "w", encoding="utf-8") as f:
-                f.write(code)
-
-            # Môi trường sạch: Không truyền token hay bí mật của LMS vào tiến trình con
-            clean_env = os.environ.copy()
-            clean_env.pop("DEVICE_TOKEN", None)
-            clean_env.pop("FIREBASE_API_KEY", None)
-            clean_env.pop("GEMINI_API_KEY", None)
-            clean_env["PYTHONUNBUFFERED"] = "1"
-            clean_env["UGOT_ROBOT_IP"] = robot_ip
-
-            start_time = time.time()
-            self.current_process = subprocess.Popen(
-                [self.python_path, "-u", script_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                cwd=temp_dir,
-                env=clean_env
-            )
-
-            # Đọc đồng thời stdout và stderr
-            async def stream_output(pipe, stream_name):
-                loop = asyncio.get_event_loop()
-                while True:
-                    line = await loop.run_in_executor(None, pipe.readline)
-                    if not line:
-                        break
-                    print(f"[{stream_name}] {line}", end="")
-                    try:
-                        await ws.send(json.dumps({
-                            "type": "task:update",
-                            "taskId": task_id,
-                            "stream": stream_name,
-                            "chunk": line,
-                            "timestamp": int(time.time() * 1000)
-                        }))
-                    except Exception:
-                        break
-
-            stdout_task = asyncio.create_task(stream_output(self.current_process.stdout, "stdout"))
-            stderr_task = asyncio.create_task(stream_output(self.current_process.stderr, "stderr"))
-
-            # Giới hạn thời gian (Timeout 35s cho Stage 3, 10s cho Stage 1/2)
-            timeout_limit = 12 if task_type in ("stage1_test", "stage2_connect") else 40
-            loop = asyncio.get_event_loop()
-
-            exit_code = None
+        # 1. Kill tiến trình học sinh nếu đang chạy
+        process_terminated = False
+        if self.current_process and self.current_process.poll() is None:
             try:
-                while self.current_process.poll() is None:
-                    if self.stop_requested:
-                        raise KeyboardInterrupt("Stop requested")
-                    if time.time() - start_time > timeout_limit:
-                        raise TimeoutError(f"Quá thời gian thực thi ({timeout_limit}s)")
-                    await asyncio.sleep(0.1)
-
-                exit_code = self.current_process.poll()
-                await stdout_task
-                await stderr_task
-            except TimeoutError as te:
-                print(f"\n⏰ Hết thời gian chờ: {te}")
-                if self.current_process and self.current_process.poll() is None:
+                self.current_process.terminate()
+                try:
+                    self.current_process.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
                     self.current_process.kill()
-                await ws.send(json.dumps({
-                    "type": "task:update",
-                    "taskId": task_id,
-                    "stream": "stderr",
-                    "chunk": f"\n❌ LỖI: Tác vụ vượt quá giới hạn thời gian chạy ({timeout_limit} giây).\n",
-                    "timestamp": int(time.time() * 1000)
-                }))
-                exit_code = -1
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                print(f"\n🛑 Tác vụ bị hủy theo yêu cầu.")
-                exit_code = -2
+                process_terminated = True
+                print("   -> Đã dừng tiến trình Python của học sinh.")
+            except Exception as e:
+                print(f"   -> Lỗi khi dừng tiến trình con: {e}")
+        else:
+            process_terminated = True
 
-            # Bảo đảm dừng robot an toàn nếu là tác vụ điều khiển
-            stop_info = {"stopConfirmed": True, "message": "Tiến trình kết thúc."}
-            if task_type == "stage3_run":
-                stop_info = self.emergency_stop_robot()
+        # 2. Gọi lệnh dừng độc lập
+        stop_res = self.send_stop_command()
+        stop_res["processTerminated"] = process_terminated
+        return stop_res
 
-            final_status = "completed" if exit_code == 0 else "error"
-            if self.stop_requested:
-                final_status = "cancelled"
+    async def execute_task(self, ws, task_data: Dict[str, Any]):
+        """Thực thi một tác vụ an toàn với khóa đơn nhiệm (Stage 1, Stage 2, hoặc Stage 3)."""
+        async with self.task_lock:
+            task_id = task_data.get("id")
+            task_type = task_data.get("type", "stage3_run")
+            code = task_data.get("code", "")
+            robot_ip = task_data.get("robotIp", self.robot_ip)
 
+            self.current_task_id = task_id
+            self.current_task_type = task_type
+            self.stop_requested = False
+
+            print(f"\n▶ Bắt đầu tác vụ [{task_type}] ID: {task_id}")
             await ws.send(json.dumps({
-                "type": "task:completed",
+                "type": "task:status",
                 "taskId": task_id,
-                "exitCode": exit_code,
-                "status": final_status,
-                "robotStopped": True,
-                "stopConfirmed": stop_info.get("stopConfirmed", True),
-                "stopMessage": stop_info.get("message", ""),
-                "elapsed": round(time.time() - start_time, 2)
+                "status": "running"
             }))
-            print(f"✔ Hoàn thành tác vụ [{task_id}] với trạng thái: {final_status}")
 
-        except Exception as e:
-            print(f"❌ Lỗi thực thi tác vụ: {e}")
-            await ws.send(json.dumps({
-                "type": "task:completed",
-                "taskId": task_id,
-                "exitCode": -1,
-                "status": "error",
-                "error": str(e),
-                "robotStopped": True,
-                "stopConfirmed": False,
-                "stopMessage": "Chưa xác nhận dừng sau sự cố lỗi."
-            }))
-        finally:
-            self.current_process = None
-            self.current_task_id = None
-            # Dọn dẹp thư mục tạm
+            # Tạo thư mục làm việc riêng biệt (temporary directory)
+            temp_dir = tempfile.mkdtemp(prefix=f"ugot_{task_id[:8]}_")
+            script_file = os.path.join(temp_dir, "run_task.py")
+
             try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
+                with open(script_file, "w", encoding="utf-8") as f:
+                    f.write(code)
+
+                # Môi trường sạch: Không truyền token hay bí mật của LMS vào tiến trình con
+                clean_env = os.environ.copy()
+                clean_env.pop("DEVICE_TOKEN", None)
+                clean_env.pop("FIREBASE_API_KEY", None)
+                clean_env.pop("GEMINI_API_KEY", None)
+                clean_env["PYTHONUNBUFFERED"] = "1"
+                clean_env["UGOT_ROBOT_IP"] = robot_ip
+
+                start_time = time.time()
+                self.current_process = subprocess.Popen(
+                    [self.python_path, "-u", script_file],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    cwd=temp_dir,
+                    env=clean_env
+                )
+
+                # Đọc đồng thời stdout và stderr
+                async def stream_output(pipe, stream_name):
+                    loop = asyncio.get_event_loop()
+                    while True:
+                        line = await loop.run_in_executor(None, pipe.readline)
+                        if not line:
+                            break
+                        print(f"[{stream_name}] {line}", end="")
+                        try:
+                            await ws.send(json.dumps({
+                                "type": "task:update",
+                                "taskId": task_id,
+                                "stream": stream_name,
+                                "chunk": line,
+                                "timestamp": int(time.time() * 1000)
+                            }))
+                        except Exception:
+                            break
+
+                stdout_task = asyncio.create_task(stream_output(self.current_process.stdout, "stdout"))
+                stderr_task = asyncio.create_task(stream_output(self.current_process.stderr, "stderr"))
+
+                # Giới hạn thời gian (Timeout 35s cho Stage 3, 10s cho Stage 1/2)
+                timeout_limit = 12 if task_type in ("stage1_test", "stage2_connect") else 40
+
+                exit_code = None
+                try:
+                    while self.current_process.poll() is None:
+                        if self.stop_requested:
+                            raise KeyboardInterrupt("Stop requested")
+                        if time.time() - start_time > timeout_limit:
+                            raise TimeoutError(f"Quá thời gian thực thi ({timeout_limit}s)")
+                        await asyncio.sleep(0.1)
+
+                    exit_code = self.current_process.poll()
+                    await stdout_task
+                    await stderr_task
+                except TimeoutError as te:
+                    print(f"\n⏰ Hết thời gian chờ: {te}")
+                    if self.current_process and self.current_process.poll() is None:
+                        self.current_process.kill()
+                    await ws.send(json.dumps({
+                        "type": "task:update",
+                        "taskId": task_id,
+                        "stream": "stderr",
+                        "chunk": f"\n❌ LỖI: Tác vụ vượt quá giới hạn thời gian chạy ({timeout_limit} giây).\n",
+                        "timestamp": int(time.time() * 1000)
+                    }))
+                    exit_code = -1
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    print(f"\n🛑 Tác vụ bị hủy theo yêu cầu.")
+                    exit_code = -2
+
+                # Xử lý dừng robot an toàn sau tác vụ: dùng send_stop_command() để không kích hoạt stop_requested
+                stop_info = {"stopCommandSent": False, "stopConfirmed": False, "message": "Không phải tác vụ điều khiển robot."}
+                if task_type == "stage3_run":
+                    stop_info = self.send_stop_command()
+
+                final_status = "cancelled" if self.stop_requested else ("completed" if exit_code == 0 else "error")
+
+                is_stop_confirmed = stop_info.get("stopConfirmed", False)
+                await ws.send(json.dumps({
+                    "type": "task:completed",
+                    "taskId": task_id,
+                    "exitCode": exit_code,
+                    "status": final_status,
+                    "processTerminated": True,
+                    "stopCommandSent": stop_info.get("stopCommandSent", False),
+                    "stopConfirmed": is_stop_confirmed,
+                    "robotStopped": is_stop_confirmed,
+                    "stopMessage": stop_info.get("message", ""),
+                    "elapsed": round(time.time() - start_time, 2)
+                }))
+                print(f"✔ Hoàn thành tác vụ [{task_id}] với trạng thái: {final_status} (Dừng robot: {is_stop_confirmed})")
+
+            except Exception as e:
+                print(f"❌ Lỗi thực thi tác vụ: {e}")
+                await ws.send(json.dumps({
+                    "type": "task:completed",
+                    "taskId": task_id,
+                    "exitCode": -1,
+                    "status": "error",
+                    "error": str(e),
+                    "processTerminated": True,
+                    "stopCommandSent": False,
+                    "stopConfirmed": False,
+                    "robotStopped": False,
+                    "stopMessage": "Chưa xác nhận dừng sau sự cố lỗi ngoại lệ."
+                }))
+            finally:
+                self.current_process = None
+                self.current_task_id = None
+                # Dọn dẹp thư mục tạm
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
     async def run(self):
         """Vòng lặp chính kết nối WebSocket và nhận lệnh."""
@@ -609,6 +627,58 @@ except Exception as e:
                             elif msg_type == "task:dispatch":
                                 # Tác vụ mới được gửi xuống
                                 task_data = data.get("task", {})
+                                task_id = task_data.get("id")
+                                expires_at = task_data.get("expiresAt")
+
+                                # 1. Kiểm tra thời hạn hiệu lực (Prevent stale/expired commands)
+                                if expires_at and (time.time() * 1000 > expires_at):
+                                    print(f"⚠️ Từ chối tác vụ {task_id}: Đã hết hạn hiệu lực.")
+                                    await ws.send(json.dumps({
+                                        "type": "task:completed",
+                                        "taskId": task_id,
+                                        "status": "error",
+                                        "exitCode": -1,
+                                        "error": "Tác vụ đã quá hạn thời gian hiệu lực.",
+                                        "processTerminated": True,
+                                        "stopCommandSent": False,
+                                        "stopConfirmed": False,
+                                        "robotStopped": False
+                                    }))
+                                    continue
+
+                                # 2. Kiểm tra chống chạy lại (Anti-replay attack/duplicate)
+                                if task_id in self.seen_task_ids:
+                                    print(f"⚠️ Từ chối tác vụ {task_id}: Tác vụ trùng lặp đã từng thực thi.")
+                                    await ws.send(json.dumps({
+                                        "type": "task:completed",
+                                        "taskId": task_id,
+                                        "status": "error",
+                                        "exitCode": -1,
+                                        "error": "Tác vụ đã được thực thi trước đó (chống chạy trùng).",
+                                        "processTerminated": True,
+                                        "stopCommandSent": False,
+                                        "stopConfirmed": False,
+                                        "robotStopped": False
+                                    }))
+                                    continue
+
+                                # 3. Khóa đơn nhiệm: Không cho phép chạy nhiều execute_task đồng thời
+                                if self.task_lock.locked():
+                                    print(f"⚠️ Từ chối tác vụ {task_id}: Laptop đang bận tác vụ khác.")
+                                    await ws.send(json.dumps({
+                                        "type": "task:completed",
+                                        "taskId": task_id,
+                                        "status": "error",
+                                        "exitCode": -1,
+                                        "error": "Laptop đang bận thực thi tác vụ khác. Hãy đợi tác vụ trước hoàn tất.",
+                                        "processTerminated": True,
+                                        "stopCommandSent": False,
+                                        "stopConfirmed": False,
+                                        "robotStopped": False
+                                    }))
+                                    continue
+
+                                self.seen_task_ids.add(task_id)
                                 asyncio.create_task(self.execute_task(ws, task_data))
 
                             elif msg_type == "task:stop":

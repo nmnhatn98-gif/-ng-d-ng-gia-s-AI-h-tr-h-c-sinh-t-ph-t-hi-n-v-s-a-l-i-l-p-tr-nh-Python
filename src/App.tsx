@@ -10,6 +10,7 @@ import { RoboticsModule } from "./components/RoboticsModule";
 import { QuizModule } from "./components/QuizModule";
 import { HtmlEditorModule } from "./components/HtmlEditorModule";
 import { PythonLabModule } from "./components/PythonLabModule";
+import { UgotPracticePanel } from "./components/UgotPracticePanel";
 import { LoginModal } from "./components/LoginModal";
 import { AuthPage } from "./components/AuthPage";
 import { 
@@ -229,12 +230,35 @@ export function App() {
         console.warn("Server submissions fetch notice:", srvErr);
       }
 
+      // 2B. Đồng bộ bài học từ API máy chủ bảo mật
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        const lRes = await fetch("/api/lessons", {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (lRes.ok) {
+          const lData = await lRes.json();
+          if (Array.isArray(lData.lessons) && lData.lessons.length > 0) {
+            setLessons(lData.lessons);
+          }
+        }
+      } catch (lErr) {
+        console.warn("API lessons fetch notice:", lErr);
+      }
+
       // 3. Đồng bộ từ Cloud Firestore (nếu có bản ghi mới hơn)
       try {
         // Load lessons if present in firestore
         const lessonsSnap = await getDocs(collection(db, "lessons"));
         if (!lessonsSnap.empty) {
-          const loadedLessons = lessonsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Lesson));
+          const loadedLessons = lessonsSnap.docs.map((d) => {
+            const data = d.data() as Lesson;
+            // Bảo vệ tuyệt đối: Nếu không phải giáo viên, loại bỏ hoàn toàn đáp án khỏi bộ nhớ trình duyệt
+            if (activeUser.role !== "teacher" && Array.isArray(data.questions)) {
+              data.questions = data.questions.map(({ correctIndex, explanation, ...rest }) => rest as any);
+            }
+            return { id: d.id, ...data };
+          });
           const loadedMap = new Map(loadedLessons.map((l) => [l.id, l]));
           const mergedLessons = [
             ...INITIAL_LESSONS.map((initL) => loadedMap.get(initL.id) || initL),
@@ -889,6 +913,25 @@ export function App() {
               onBack={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
               onSubmitWork={handleSubmitWork}
             />
+          </div>
+        )}
+
+        {activeTab === "ugot-lab" && (
+          <div className="flex-1 min-h-0 w-full flex flex-col bg-slate-950 overflow-hidden">
+            <div className="h-11 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
+                  className="px-2.5 py-1 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center gap-1 cursor-pointer font-medium"
+                >
+                  ← Quay lại
+                </button>
+                <span className="font-bold text-white text-xs sm:text-sm">Thực Hành Robot UGOT Laptop (Cầu nối Windows WSS)</span>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <UgotPracticePanel currentUser={activeUser} />
+            </div>
           </div>
         )}
 

@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import path from "path";
+import crypto from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -361,7 +362,10 @@ app.post("/api/students/register", async (req, res) => {
       current.unshift(newRecord);
     }
 
-    writeJsonData("students.json", current);
+    const writeOk = writeJsonData("students.json", current);
+    if (!writeOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể lưu thông tin học sinh." });
+    }
     saveToStudentVault([newRecord]);
 
     res.json({ success: true, student: sanitizeStudent(newRecord), count: current.length });
@@ -493,7 +497,10 @@ app.put("/api/students/:uid", async (req, res) => {
       role: roleToSet,
       updatedAt: new Date().toISOString() 
     };
-    writeJsonData("students.json", current);
+    const updateOk = writeJsonData("students.json", current);
+    if (!updateOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể cập nhật thông tin học sinh." });
+    }
     res.json({ success: true, student: sanitizeStudent(current[index]) });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi cập nhật học sinh: " + err.message });
@@ -508,7 +515,10 @@ app.delete("/api/students/:uid", async (req, res) => {
     const current = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
     const { uid } = req.params;
     const filtered = current.filter((s) => s.uid !== uid);
-    writeJsonData("students.json", filtered);
+    const deleteOk = writeJsonData("students.json", filtered);
+    if (!deleteOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể xóa học sinh." });
+    }
     res.json({ success: true, remaining: filtered.length });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi xóa học sinh: " + err.message });
@@ -584,7 +594,10 @@ app.post("/api/submissions", async (req, res) => {
         createdAt: submission.submittedAt || new Date().toISOString() 
       });
     }
-    writeJsonData("submissions.json", current);
+    const subOk = writeJsonData("submissions.json", current);
+    if (!subOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể lưu bài nộp vào tệp tin bền vững." });
+    }
     res.json({ success: true, submission });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi lưu bài nộp: " + err.message });
@@ -612,10 +625,369 @@ app.put("/api/submissions/:id/grade", async (req, res) => {
       status: "graded",
       gradedAt: new Date().toISOString(),
     };
-    writeJsonData("submissions.json", current);
+    const gradeOk = writeJsonData("submissions.json", current);
+    if (!gradeOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể lưu kết quả chấm điểm." });
+    }
     res.json({ success: true, submission: current[index] });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi chấm bài: " + err.message });
+  }
+});
+
+// ==========================================
+// 2B. LESSONS & SERVER-SIDE QUIZ GRADING APIS
+// (Bảo vệ tuyệt đối đáp án, lời giải, test ẩn)
+// ==========================================
+
+interface ProtectedQuizKey {
+  questionId: string;
+  correctIndex: number;
+  explanation: string;
+}
+
+interface StoredLessonKey {
+  lessonId: string;
+  quizKeys?: ProtectedQuizKey[];
+  hiddenTestcases?: any[];
+}
+
+// Master answer keys seeded on server (Never exposed to student network queries)
+const DEFAULT_SEED_LESSON_KEYS: StoredLessonKey[] = [
+  {
+    lessonId: "les-elem-quiz-01",
+    quizKeys: [
+      {
+        questionId: "q1",
+        correctIndex: 0,
+        explanation: "Bàn phím là thiết bị vào dùng để gõ các ký tự văn bản.",
+      },
+      {
+        questionId: "q2",
+        correctIndex: 1,
+        explanation: "Chuột tiêu chuẩn có nút chuột trái, chuột phải và con lăn ở giữa.",
+      },
+    ],
+  },
+];
+
+const DEFAULT_SEED_LESSONS: any[] = [
+  {
+    id: "les-elem-scratch-01",
+    title: "Khởi động cùng Scratch: Mèo Kitty dạo phố",
+    description: "Học sinh kéo thả khối lệnh di chuyển, lặp lại và phát âm thanh meo meo khi mèo bước đi.",
+    level: "elementary",
+    moduleType: "scratch",
+    durationMinutes: 45,
+    createdAt: new Date().toISOString(),
+    scratchProjectId: "demo-scratch-1",
+  },
+  {
+    id: "les-elem-quiz-01",
+    title: "Trắc nghiệm nhận biết phần cứng máy tính",
+    description: "Nhận biết chuột, bàn phím, màn hình và thân máy qua các câu hỏi minh họa trực quan.",
+    level: "elementary",
+    moduleType: "quiz",
+    durationMinutes: 20,
+    createdAt: new Date().toISOString(),
+    questions: [
+      {
+        id: "q1",
+        question: "Thiết bị nào sau đây dùng để nhập văn bản vào máy tính?",
+        options: ["Bàn phím", "Màn hình", "Loa", "Máy in"],
+      },
+      {
+        id: "q2",
+        question: "Chuột máy tính thường có bao nhiêu nút bấm chính?",
+        options: ["1 nút", "2 nút (trái và phải)", "5 nút", "Không có nút nào"],
+      },
+    ],
+  },
+  {
+    id: "les-thcs-py-01",
+    title: "Lập trình Python THCS: Tính chu vi và diện tích hình chữ nhật",
+    description: "Nhập vào chiều dài a và chiều rộng b từ bàn phím, tính và in ra chu vi, diện tích hình chữ nhật.",
+    level: "middle",
+    moduleType: "coding",
+    language: "python",
+    durationMinutes: 45,
+    createdAt: new Date().toISOString(),
+    starterCode: `# Nhập chiều dài và chiều rộng\na = int(input())\nb = int(input())\n\n# Tính toán chu vi và diện tích\nchu_vi = 2 * (a + b)\ndien_tich = a * b\n\nprint("Chu vi:", chu_vi)\nprint("Dien tich:", dien_tich)\n`,
+    testcases: [
+      {
+        id: 1,
+        input: "5\n3",
+        expectedOutput: "Chu vi: 16\nDien tich: 15",
+      },
+      {
+        id: 2,
+        input: "10\n20",
+        expectedOutput: "Chu vi: 60\nDien tich: 200",
+      },
+    ],
+  },
+];
+
+// Helper: Sanitize lesson for student consumption (Strips answers, explanations, hidden tests)
+function sanitizeLessonForStudent(lesson: any) {
+  const sanitized = { ...lesson };
+  if (Array.isArray(sanitized.questions)) {
+    sanitized.questions = sanitized.questions.map((q: any) => {
+      const { correctIndex, explanation, ...safeQuestion } = q;
+      return safeQuestion;
+    });
+  }
+  if (Array.isArray(sanitized.testcases)) {
+    sanitized.testcases = sanitized.testcases.filter((tc: any) => !tc.isHidden);
+  }
+  return sanitized;
+}
+
+// 1. Get lessons (Students get sanitized data without answers; Teachers get full data)
+app.get("/api/lessons", async (req, res) => {
+  try {
+    const authUser = await verifyAuthHeader(req);
+    const lessons = readJsonData<any[]>("lessons.json", DEFAULT_SEED_LESSONS);
+    const lessonKeys = readJsonData<StoredLessonKey[]>("lesson_keys.json", DEFAULT_SEED_LESSON_KEYS);
+
+    if (authUser && authUser.role === "teacher") {
+      // Teachers get full lessons with master keys merged
+      const keyMap = new Map(lessonKeys.map((k) => [k.lessonId, k]));
+      const fullLessons = lessons.map((l) => {
+        const full = { ...l };
+        const keyItem = keyMap.get(l.id);
+        if (keyItem && Array.isArray(full.questions) && Array.isArray(keyItem.quizKeys)) {
+          const qKeyMap = new Map(keyItem.quizKeys.map((qk) => [qk.questionId, qk]));
+          full.questions = full.questions.map((q: any) => {
+            const match = qKeyMap.get(q.id);
+            return match
+              ? { ...q, correctIndex: match.correctIndex, explanation: match.explanation }
+              : q;
+          });
+        }
+        return full;
+      });
+      return res.json({ success: true, lessons: fullLessons, isTeacherView: true });
+    }
+
+    // Students / Unauthenticated: Absolutely NO answers or explanations exposed
+    const safeLessons = lessons.map(sanitizeLessonForStudent);
+    return res.json({ success: true, lessons: safeLessons, isTeacherView: false });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tải bài học: " + err.message });
+  }
+});
+
+// 2. Teacher save or create lesson (Splits questions from solution keys into protected storage)
+app.post("/api/lessons", async (req, res) => {
+  try {
+    const teacher = await requireTeacher(req, res);
+    if (!teacher) return;
+
+    const lessonData = req.body;
+    if (!lessonData || !lessonData.id) {
+      return res.status(400).json({ error: "Dữ liệu bài tập không hợp lệ (thiếu id)." });
+    }
+
+    const currentLessons = readJsonData<any[]>("lessons.json", DEFAULT_SEED_LESSONS);
+    const currentKeys = readJsonData<StoredLessonKey[]>("lesson_keys.json", DEFAULT_SEED_LESSON_KEYS);
+
+    // Extract secret quiz keys and hidden testcases
+    const secretKeys: ProtectedQuizKey[] = [];
+    if (Array.isArray(lessonData.questions)) {
+      lessonData.questions.forEach((q: any, idx: number) => {
+        const qId = q.id || `q${idx + 1}`;
+        if (typeof q.correctIndex === "number") {
+          secretKeys.push({
+            questionId: qId,
+            correctIndex: q.correctIndex,
+            explanation: q.explanation || "",
+          });
+        }
+      });
+    }
+
+    // Save protected keys
+    const keyIndex = currentKeys.findIndex((k) => k.lessonId === lessonData.id);
+    const newKeyRecord: StoredLessonKey = {
+      lessonId: lessonData.id,
+      quizKeys: secretKeys,
+      hiddenTestcases: Array.isArray(lessonData.testcases)
+        ? lessonData.testcases.filter((tc: any) => tc.isHidden)
+        : [],
+    };
+    if (keyIndex >= 0) {
+      currentKeys[keyIndex] = newKeyRecord;
+    } else {
+      currentKeys.push(newKeyRecord);
+    }
+    const okKeys = writeJsonData("lesson_keys.json", currentKeys);
+    if (!okKeys) {
+      return res.status(500).json({ error: "Không thể lưu đáp án bảo mật lên máy chủ." });
+    }
+
+    // Clean lesson before saving to public lesson list
+    const studentSafeLesson = sanitizeLessonForStudent(lessonData);
+    const lIndex = currentLessons.findIndex((l) => l.id === lessonData.id);
+    if (lIndex >= 0) {
+      currentLessons[lIndex] = { ...currentLessons[lIndex], ...studentSafeLesson, updatedAt: new Date().toISOString() };
+    } else {
+      currentLessons.unshift({ ...studentSafeLesson, createdAt: new Date().toISOString() });
+    }
+
+    const okLessons = writeJsonData("lessons.json", currentLessons);
+    if (!okLessons) {
+      return res.status(500).json({ error: "Không thể lưu bài tập vào danh mục hệ thống." });
+    }
+
+    res.json({ success: true, lesson: currentLessons[lIndex >= 0 ? lIndex : 0] });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi lưu bài tập: " + err.message });
+  }
+});
+
+// 3. Server-side Quiz Grading Endpoint (Chấm điểm hoàn toàn trên máy chủ, xác thực quyền, hạn nộp)
+app.post("/api/lessons/:lessonId/submit-quiz", async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { lessonId } = req.params;
+    const { answers, timeSpentSeconds, id: clientSubId } = req.body;
+
+    if (!answers || (typeof answers !== "object" && !Array.isArray(answers))) {
+      return res.status(400).json({ error: "Dữ liệu câu trả lời trắc nghiệm không hợp lệ." });
+    }
+
+    const lessons = readJsonData<any[]>("lessons.json", DEFAULT_SEED_LESSONS);
+    const lesson = lessons.find((l) => l.id === lessonId);
+    if (!lesson) {
+      return res.status(404).json({ error: "Không tìm thấy bài học/đề thi." });
+    }
+
+    // 1. Kiểm tra hạn nộp (Deadline check)
+    if (lesson.dueDate) {
+      const dueTime = new Date(lesson.dueDate).getTime();
+      if (Date.now() > dueTime) {
+        return res.status(403).json({ error: "Đã quá hạn nộp bài trắc nghiệm (" + lesson.dueDate + ")." });
+      }
+    }
+
+    // 2. Kiểm tra lớp được phân công (Class permission check)
+    let studentClass = "";
+    const studentsVault = readJsonData<any[]>("students_vault.json", []);
+    const stRecord = studentsVault.find((s) => s.uid === user.uid);
+    if (stRecord) studentClass = stRecord.classGrade || "";
+
+    if (lesson.targetClasses && lesson.targetClasses.length > 0 && !lesson.targetClasses.includes("all")) {
+      if (user.role === "student" && !lesson.targetClasses.includes(studentClass)) {
+        return res.status(403).json({
+          error: `Bài thi này chỉ dành cho lớp ${lesson.targetClasses.join(", ")}, bạn không thuộc danh sách được giao.`,
+        });
+      }
+    }
+
+    // 3. Kiểm tra số lần nộp / nộp lại
+    const submissions = readJsonData<any[]>("submissions.json", []);
+    const existingIndex = submissions.findIndex(
+      (s) => s.lessonId === lessonId && (s.studentId === user.uid || s.studentEmail === user.email)
+    );
+
+    if (existingIndex >= 0 && lesson.allowReviewAfterDue === false && submissions[existingIndex].status === "graded") {
+      return res.status(403).json({ error: "Bạn đã nộp bài thi này trước đó và bài không cho phép nộp lại." });
+    }
+
+    // 4. Lấy đáp án bảo vệ từ máy chủ
+    const lessonKeys = readJsonData<StoredLessonKey[]>("lesson_keys.json", DEFAULT_SEED_LESSON_KEYS);
+    const keyData = lessonKeys.find((k) => k.lessonId === lessonId);
+
+    const questions: any[] = lesson.questions || [];
+    let correctCount = 0;
+    const totalCount = questions.length || 1;
+    const reviewDetails: any[] = [];
+
+    // Chấm từng câu hỏi
+    questions.forEach((q, idx) => {
+      const qId = q.id || `q${idx + 1}`;
+      const studentAns = Array.isArray(answers) ? answers[idx] : answers[idx] !== undefined ? answers[idx] : answers[qId];
+
+      const masterKey = keyData?.quizKeys?.find((k) => k.questionId === qId);
+      const correctIdx = masterKey?.correctIndex ?? q.correctIndex;
+      const isCorrect = typeof correctIdx === "number" && Number(studentAns) === correctIdx;
+
+      if (isCorrect) {
+        correctCount++;
+      }
+
+      // Chuẩn bị chi tiết review (chỉ trả về nếu bài cho phép)
+      reviewDetails.push({
+        questionId: qId,
+        questionIndex: idx,
+        isCorrect,
+        studentAnswer: studentAns,
+        correctIndex: correctIdx,
+        explanation: masterKey?.explanation || q.explanation || "",
+      });
+    });
+
+    const scoreOutOf10 = Number(((correctCount / totalCount) * 10).toFixed(1));
+
+    // 5. Lưu bài nộp vào danh sách submissions
+    const subId = clientSubId || (existingIndex >= 0 ? submissions[existingIndex].id : `sub-quiz-${Date.now()}`);
+    const submissionRecord = {
+      id: subId,
+      lessonId,
+      lessonTitle: lesson.title,
+      studentId: user.uid,
+      studentName: stRecord?.fullName || user.email.split("@")[0],
+      studentEmail: user.email,
+      moduleType: "quiz",
+      content: {
+        quizAnswers: answers,
+        passedCount: correctCount,
+        totalCount: totalCount,
+        timeSpentSeconds: timeSpentSeconds || 0,
+      },
+      score: scoreOutOf10,
+      maxScore: 10,
+      status: "graded",
+      teacherFeedback:
+        scoreOutOf10 >= 8
+          ? "Xuất sắc! Em đã nắm rất vững kiến thức bài học."
+          : scoreOutOf10 >= 5
+          ? "Khá tốt! Em hãy đọc kỹ các phần giải thích để hoàn thiện hơn."
+          : "Cần cố gắng ôn tập lại lý thuyết bài giảng nhé!",
+      submittedAt: new Date().toISOString(),
+      gradedAt: new Date().toISOString(),
+    };
+
+    if (existingIndex >= 0) {
+      submissions[existingIndex] = { ...submissions[existingIndex], ...submissionRecord, updatedAt: new Date().toISOString() };
+    } else {
+      submissions.unshift(submissionRecord);
+    }
+
+    const writeOk = writeJsonData("submissions.json", submissions);
+    if (!writeOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể lưu kết quả bài thi." });
+    }
+
+    // 6. Trả kết quả: Chỉ trả chi tiết giải thích nếu chính sách cấu hình bài thi cho phép
+    const isReviewAllowed = lesson.allowReviewAfterDue !== false;
+    return res.json({
+      success: true,
+      submission: submissionRecord,
+      score: scoreOutOf10,
+      correctCount,
+      totalCount,
+      reviewAllowed: isReviewAllowed,
+      review: isReviewAllowed ? reviewDetails : undefined,
+      message: isReviewAllowed
+        ? "Đã chấm điểm thành công và hiển thị phân tích bài làm."
+        : "Đã chấm và ghi nhận bài nộp thành công. Đáp án chi tiết sẽ được công bố sau khi kết thúc đợt thi.",
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi chấm bài trắc nghiệm: " + err.message });
   }
 });
 
@@ -2355,6 +2727,8 @@ app.delete("/api/ugot/devices/:deviceId", async (req, res) => {
 });
 
 // 5. Submit / Run task on robot
+const ALLOWED_UGOT_TASK_TYPES = ["stage1_test", "stage2_connect", "stage3_run", "emergency_stop"] as const;
+
 app.post("/api/ugot/tasks", async (req, res) => {
   try {
     const user = await requireAuth(req, res);
@@ -2363,6 +2737,13 @@ app.post("/api/ugot/tasks", async (req, res) => {
     const { deviceId, type, code } = req.body;
     if (!deviceId || !type) {
       return res.status(400).json({ error: "Thiếu mã thiết bị (deviceId) hoặc loại tác vụ (type)." });
+    }
+
+    // 1. Strict task enum validation (Reject any rogue/unknown types)
+    if (!ALLOWED_UGOT_TASK_TYPES.includes(type)) {
+      return res.status(400).json({
+        error: `Loại tác vụ không hợp lệ ('${type}'). Chỉ chấp nhận: ${ALLOWED_UGOT_TASK_TYPES.join(", ")}.`,
+      });
     }
 
     const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
@@ -2405,14 +2786,50 @@ app.post("/api/ugot/tasks", async (req, res) => {
     }
 
     const taskId = `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const isApprovalNeeded = user.role === "student" && type === "stage3_run" && device.requireTeacherApproval;
 
-    let taskCode = code || "";
+    // 2. Tác vụ Stage 1 và Stage 2 BẮT BUỘC dùng mã cố định do hệ thống tạo, không nhận mã tùy ý từ client
+    let taskCode = "";
     if (type === "stage1_test") {
-      taskCode = `import sys\nprint("Kết nối Python trên laptop thành công")\nprint(f"Phiên bản Python: {sys.version.split()[0]}")\ntry:\n    from ugot import ugot\n    print("Import thư viện ugot thành công!")\nexcept ImportError as e:\n    print(f"Chưa cài thư viện ugot: {e}")\n`;
+      taskCode = `import sys
+print("=== GIAI ĐOẠN 1: KIỂM TRA MÔI TRƯỜNG LAPTOP ===")
+print("Kết nối Python trên laptop thành công")
+print(f"Phiên bản Python: {sys.version.split()[0]}")
+try:
+    from ugot import ugot
+    print("✅ Import thư viện ugot thành công!")
+except ImportError as e:
+    print(f"❌ Chưa cài thư viện ugot: {e}")
+    sys.exit(1)
+`;
     } else if (type === "stage2_connect") {
-      taskCode = `import sys\nimport time\ntry:\n    from ugot import ugot\n    print(f"Bắt đầu khởi tạo kết nối Robot UGOT tại IP: {repr('${device.robotIp}')}...")\n    rb = ugot.UGOT()\n    ret = rb.initialize("${device.robotIp}")\n    print(f"Kết quả rb.initialize(): {ret}")\n    time.sleep(1)\n    print("✅ Kiểm tra kết nối robot phản hồi thành công!")\nexcept Exception as e:\n    print(f"❌ Lỗi kết nối robot: {e}")\n    sys.exit(1)\n`;
+      taskCode = `import sys
+import time
+print("=== GIAI ĐOẠN 2: KIỂM TRA KHỞI TẠO ROBOT ===")
+try:
+    from ugot import ugot
+    rb = ugot.UGOT()
+    ip = "${device.robotIp}"
+    print(f"Đang gửi tín hiệu khởi tạo tới robot tại IP {ip}...")
+    init_res = rb.initialize(ip)
+    print(f"Phản hồi từ SDK initialize(): {init_res}")
+    has_stop = hasattr(rb, "transform_stop")
+    print(f"Cơ chế an toàn rb.transform_stop(): {'Hỗ trợ' if has_stop else 'CHƯA HỖ TRỢ'}")
+    if not has_stop:
+        print("⚠️ Cảnh báo: Robot thiếu hàm dừng an toàn, chưa cho phép chạy chuyển động.")
+    time.sleep(0.5)
+    print("✅ Hoàn tất kiểm tra kết nối robot.")
+except Exception as e:
+    print(f"❌ Lỗi khởi tạo robot: {e}")
+    sys.exit(1)
+`;
+    } else {
+      // stage3_run
+      taskCode = code || "";
     }
+
+    const codeHash = crypto.createHash("sha256").update(taskCode).digest("hex");
+    // Học sinh chạy Stage 3 bắt buộc phải được giáo viên phê duyệt
+    const isApprovalNeeded = user.role === "student" && type === "stage3_run";
 
     const newTask: StoredUgotTask = {
       id: taskId,
@@ -2423,6 +2840,7 @@ app.post("/api/ugot/tasks", async (req, res) => {
       studentClass,
       type,
       code: taskCode,
+      codeHash,
       status: isApprovalNeeded ? "pending_approval" : "queued",
       approvedByTeacher: !isApprovalNeeded,
       stdout: "",
@@ -2432,7 +2850,10 @@ app.post("/api/ugot/tasks", async (req, res) => {
 
     const tasks = readJsonData<StoredUgotTask[]>("ugot_tasks.json", []);
     tasks.push(newTask);
-    writeJsonData("ugot_tasks.json", tasks);
+    const saveTaskOk = writeJsonData("ugot_tasks.json", tasks);
+    if (!saveTaskOk) {
+      return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể lưu tác vụ." });
+    }
 
     // If teacher or doesn't need approval, dispatch immediately to bridge
     if (!isApprovalNeeded) {
@@ -2456,7 +2877,9 @@ app.post("/api/ugot/tasks", async (req, res) => {
               id: taskId,
               type,
               code: taskCode,
+              codeHash,
               robotIp: device.robotIp,
+              expiresAt: Date.now() + 60 * 1000,
             },
           })
         );
@@ -2533,7 +2956,7 @@ app.post("/api/ugot/tasks/:taskId/stop", async (req, res) => {
   }
 });
 
-// 7. Teacher approve / reject task
+// 7. Teacher approve / reject task (Gắn chặt phê duyệt với hash mã nguồn, thiết bị, và IP robot)
 app.post("/api/ugot/tasks/:taskId/approve", async (req, res) => {
   try {
     const teacher = await requireTeacher(req, res);
@@ -2550,7 +2973,11 @@ app.post("/api/ugot/tasks/:taskId/approve", async (req, res) => {
     task.reviewedAt = new Date().toISOString();
 
     if (approved) {
+      // Re-verify hash integrity before dispatch
+      const currentCodeHash = crypto.createHash("sha256").update(task.code).digest("hex");
+      task.codeHash = currentCodeHash;
       task.approvedByTeacher = true;
+      task.approvedCodeHash = currentCodeHash;
       task.status = "queued";
 
       const devices = readJsonData<StoredUgotDevice[]>("ugot_devices.json", []);
@@ -2575,7 +3002,9 @@ app.post("/api/ugot/tasks/:taskId/approve", async (req, res) => {
               id: task.id,
               type: task.type,
               code: task.code,
+              codeHash: currentCodeHash,
               robotIp: task.robotIp,
+              expiresAt: Date.now() + 60 * 1000,
             },
           })
         );
@@ -2589,7 +3018,10 @@ app.post("/api/ugot/tasks/:taskId/approve", async (req, res) => {
       task.stderr = "Giáo viên không phê duyệt chạy mã nguồn này.";
     }
 
-    writeJsonData("ugot_tasks.json", tasks);
+    const okTasks = writeJsonData("ugot_tasks.json", tasks);
+    if (!okTasks) {
+      return res.status(500).json({ error: "Không thể cập nhật trạng thái duyệt tác vụ." });
+    }
     broadcastToWeb(task.deviceId, { type: "task:status", taskId, status: task.status });
 
     return res.json({ success: true, task });

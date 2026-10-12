@@ -1,8 +1,16 @@
 import React, { useState, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
-import { UserProfile, ChatMessage, Submission } from "../types";
-import { executeCodeHybrid } from "../lib/pythonRunner";
+import { 
+  UserProfile, 
+  ChatMessage, 
+  Submission, 
+  DebugSession, 
+  DebugRunItem, 
+  AiHintItem, 
+  StudentReflection 
+} from "../types";
+import { executeCodeHybrid, PYTHON_RUNTIME_COMPATIBILITY_INFO } from "../lib/pythonRunner";
 import { 
   Play, 
   RotateCcw, 
@@ -24,7 +32,15 @@ import {
   Sliders, 
   HelpCircle,
   Zap,
-  Save
+  Save,
+  Info,
+  RefreshCw,
+  MessageSquare,
+  ListChecks,
+  History,
+  ShieldAlert,
+  ArrowRight,
+  X
 } from "lucide-react";
 
 interface PythonLabModuleProps {
@@ -230,7 +246,8 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   const [consoleOutput, setConsoleOutput] = useState<string>("");
   const [execTime, setExecTime] = useState<number | null>(null);
   const [isError, setIsError] = useState<boolean>(false);
-  const [activeBottomTab, setActiveBottomTab] = useState<"output" | "stdin" | "cheatsheet">("output");
+  const [activeBottomTab, setActiveBottomTab] = useState<"output" | "stdin" | "diary" | "cheatsheet">("output");
+  const [showCompatModal, setShowCompatModal] = useState<boolean>(false);
 
   // Editor settings
   const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
@@ -240,21 +257,56 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // AI Assistant state
+  // Student Reflection state (Phần học sinh trả lời để hoàn thiện chu trình sửa lỗi)
+  const [reflection, setReflection] = useState<StudentReflection>({
+    errorEncountered: "",
+    errorReason: "",
+    howFixed: "",
+  });
+
+  // Practice Debugging Session state (Lưu nhật ký bền vững)
+  const [debugSession, setDebugSession] = useState<DebugSession>(() => ({
+    sessionId: `py-sess-${Date.now()}`,
+    studentId: currentUser.uid,
+    studentCode: currentUser.studentCode,
+    studentName: currentUser.displayName,
+    lessonId: "python-sandbox-practice",
+    lessonTitle: `Thực hành Python: ${PYTHON_TEMPLATES.arithmetic_gdpt.name}`,
+    startedAt: new Date().toISOString(),
+    initialCode: PYTHON_TEMPLATES.arithmetic_gdpt.code,
+    finalCode: PYTHON_TEMPLATES.arithmetic_gdpt.code,
+    runs: [],
+    hints: [],
+    reflection: {
+      errorEncountered: "",
+      errorReason: "",
+      howFixed: "",
+    },
+    saveStatus: "idle",
+  }));
+
+  // AI Assistant state (3 Hint Levels: 1=Socratic, 2=Vị trí & Nguyên nhân, 3=Nguyên lý & Ví dụ)
+  const [hintLevel, setHintLevel] = useState<1 | 2 | 3>(1);
   const [isAiOpen, setIsAiOpen] = useState<boolean>(true);
   const [aiInput, setAiInput] = useState<string>("");
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
+  const [aiErrorState, setAiErrorState] = useState<{ message: string; retryCountdown?: number; lastPrompt?: string } | null>(null);
+
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
     {
       id: "welcome-py",
       role: "assistant",
       content: `Xin chào **${currentUser.displayName}**! 👋 
-Mình là **Gia sư AI Lập trình Python**. 
+Mình là **Gia sư AI Lập trình Python**.
 
-Đây là **Sân chơi Python tự do**: bạn có thể nhập lệnh, chạy thử tính toán số học, làm bài Tin học 10 GDPT 2018, hoặc thử nghiệm các giải thuật mới bất cứ lúc nào mà không cần vào bài tập cụ thể.
+Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư phạm**:
+- 🔍 **Mức 1 (Định hướng)**: Đặt câu hỏi Socratic giúp bạn tự nhận ra lỗi.
+- 📍 **Mức 2 (Vị trí & Nguyên nhân)**: Chỉ ra dòng lệnh và nguyên nhân gây lỗi.
+- 💡 **Mức 3 (Nguyên lý & Ví dụ)**: Giải thích lý thuyết và ví dụ tương tự.
 
-👉 Nếu có lỗi cú pháp hoặc muốn gợi ý thuật toán, hãy nhắn cho mình ngay nhé!`,
+👉 *Gia sư sẽ không giải hộ toàn bộ bài để giúp bạn tự phát triển tư duy lập trình!*`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
   ]);
@@ -270,6 +322,31 @@ Mình là **Gia sư AI Lập trình Python**.
       setConsoleOutput("");
       setExecTime(null);
       setIsError(false);
+      // Reset or update debug session for new problem
+      setDebugSession({
+        sessionId: `py-sess-${Date.now()}`,
+        studentId: currentUser.uid,
+        studentCode: currentUser.studentCode,
+        studentName: currentUser.displayName,
+        lessonId: `python-session-${key}`,
+        lessonTitle: `Thực hành Python: ${tmpl.name}`,
+        startedAt: new Date().toISOString(),
+        initialCode: tmpl.code,
+        finalCode: tmpl.code,
+        runs: [],
+        hints: [],
+        reflection: {
+          errorEncountered: "",
+          errorReason: "",
+          howFixed: "",
+        },
+        saveStatus: "idle",
+      });
+      setReflection({
+        errorEncountered: "",
+        errorReason: "",
+        howFixed: "",
+      });
     }
   };
 
@@ -289,8 +366,12 @@ Mình là **Gia sư AI Lập trình Python**.
 
       setExecTime(result.time);
 
+      let runErrorText: string | undefined = undefined;
+      let runOutputText = result.output || "";
+
       if (result.error) {
         setIsError(true);
+        runErrorText = result.error;
         setConsoleOutput(`❌ LỖI BIÊN DỊCH / THỰC THI (Execution Error):\n${result.error}\n\n${result.output || ""}`);
       } else {
         const out = result.output !== undefined ? result.output : "";
@@ -300,6 +381,24 @@ Mình là **Gia sư AI Lập trình Python**.
           setConsoleOutput(out);
         }
       }
+
+      // Record this run into Practice Debugging Session Log
+      const runItem: DebugRunItem = {
+        id: `run-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        code,
+        stdin: stdinInput,
+        output: runOutputText,
+        error: runErrorText,
+        timeMs: result.time,
+        passed: !result.error,
+      };
+
+      setDebugSession((prev) => ({
+        ...prev,
+        runs: [runItem, ...prev.runs],
+        finalCode: code,
+      }));
     } catch (err: any) {
       setIsError(true);
       setConsoleOutput(`❌ Lỗi thực thi mã nguồn: ${err.message}`);
@@ -328,13 +427,23 @@ Mình là **Gia sư AI Lập trình Python**.
     URL.revokeObjectURL(url);
   };
 
-  // Save practice work
+  // Save practice work (Bỏ việc tự gán 10/10 và graded; lưu ở trạng thái submitted)
   const handleSavePractice = async () => {
     if (!onSubmitWork) return;
     setIsSaving(true);
+    setSaveError(null);
+
+    const sessionToSave: DebugSession = {
+      ...debugSession,
+      finalCode: code,
+      finishedAt: new Date().toISOString(),
+      reflection,
+      saveStatus: "saving",
+    };
+
     try {
       await onSubmitWork({
-        lessonId: "python-sandbox-practice",
+        lessonId: `python-session-${selectedTemplateKey}`,
         lessonTitle: `Thực hành Python: ${PYTHON_TEMPLATES[selectedTemplateKey]?.name || "Mã tự do"}`,
         studentId: currentUser.uid,
         studentName: currentUser.displayName,
@@ -346,29 +455,40 @@ Mình là **Gia sư AI Lập trình Python**.
           stdin: stdinInput,
           consoleOutput,
           templateKey: selectedTemplateKey,
+          debugSession: sessionToSave,
         },
-        score: 10,
+        // Bắt đầu bằng trạng thái submitted, chưa có điểm số (chờ giáo viên duyệt và chấm điểm)
+        score: 0,
         maxScore: 10,
-        status: "graded",
+        status: "submitted",
       });
+
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (e) {
-      console.error(e);
+      setDebugSession({ ...sessionToSave, saveStatus: "saved" });
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (e: any) {
+      console.error("Save practice error:", e);
+      setSaveError(e?.message || "Lỗi lưu bài nộp. Dữ liệu chưa được đồng bộ.");
+      setDebugSession({ ...sessionToSave, saveStatus: "error" });
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Send message to AI
-  const handleSendAi = async (customPrompt?: string) => {
+  // Send message to AI Tutor (supports 3 hint levels & graceful error handling)
+  const handleSendAi = async (customPrompt?: string, targetLevel?: 1 | 2 | 3, forceFallback: boolean = false) => {
+    const lvl = targetLevel !== undefined ? targetLevel : hintLevel;
     const text = customPrompt || aiInput.trim();
     if (!text || isAiThinking) return;
+
+    // Ensure AI drawer is open
+    setIsAiOpen(true);
+    setAiErrorState(null);
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
-      content: text,
+      content: `[Mức ${lvl}] ${text}`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -386,31 +506,76 @@ Mình là **Gia sư AI Lập trình Python**.
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          hintLevel: lvl,
           history: aiMessages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
           codeContext: code,
+          stdin: stdinInput,
           language: "python",
-          consoleOutput: consoleOutput ? consoleOutput.slice(0, 500) : undefined,
+          consoleOutput: consoleOutput ? consoleOutput.slice(0, 1500) : undefined,
+          studentId: currentUser.uid,
+          allowFallback: forceFallback, // Only use fallback if forced or agreed
         }),
       });
 
+      if (!res.ok) {
+        // Inspect HTTP status codes
+        if (res.status === 429) {
+          const errData = await res.json().catch(() => ({}));
+          const retryAfter = errData.retryAfter || 15;
+          setAiErrorState({
+            message: `⚠️ Tần suất yêu cầu quá nhanh. Vui lòng đợi ${retryAfter} giây trước khi gửi tiếp.`,
+            retryCountdown: retryAfter,
+            lastPrompt: text,
+          });
+          return;
+        }
+
+        if (res.status === 503 || res.status === 504) {
+          setAiErrorState({
+            message: "⚠️ Dịch vụ Gia sư AI đang quá tải hoặc gián đoạn kết nối. Bạn có thể nhấn 'Thử lại' hoặc 'Xem gợi ý có sẵn'.",
+            lastPrompt: text,
+          });
+          return;
+        }
+
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Lỗi máy chủ (${res.status})`);
+      }
+
       const data = await res.json();
+      const isFallback = Boolean(data.isFallback || data.source === "fallback");
+      const replyContent = isFallback
+        ? `⚠️ **[Gợi ý có sẵn — không phải phản hồi AI]**\n\n${data.text}`
+        : data.text || "Gia sư đã xem qua mã nguồn nhưng chưa có phản hồi phù hợp.";
+
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: data.text || "Mình chưa thể phản hồi lúc này, bạn thử hỏi lại nhé.",
+        content: replyContent,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
+
       setAiMessages((prev) => [...prev, assistantMsg]);
-    } catch (err: any) {
-      setAiMessages((prev) => [
+
+      // Record received hint into debugSession
+      const hintItem: AiHintItem = {
+        id: `hint-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        level: lvl,
+        prompt: text,
+        response: data.text,
+        source: isFallback ? "fallback" : "ai",
+      };
+
+      setDebugSession((prev) => ({
         ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: "⚠️ Không thể kết nối tới Gia sư AI. Vui lòng kiểm tra lại kết nối mạng.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
+        hints: [hintItem, ...prev.hints],
+      }));
+    } catch (err: any) {
+      setAiErrorState({
+        message: `⚠️ Lỗi kết nối AI: ${err?.message || "Không thể kết nối đến máy chủ"}.`,
+        lastPrompt: text,
+      });
     } finally {
       setIsAiThinking(false);
       setTimeout(() => {
@@ -638,6 +803,23 @@ Mình là **Gia sư AI Lập trình Python**.
                 </button>
 
                 <button
+                  onClick={() => setActiveBottomTab("diary")}
+                  className={`px-3 py-1 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 ${
+                    activeBottomTab === "diary"
+                      ? "bg-slate-800 text-white border border-slate-700/80"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Nhật Ký Sửa Lỗi & Tự Giải Thích</span>
+                  {(debugSession.runs.length > 0 || debugSession.hints.length > 0) && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-900/80 text-indigo-300 font-bold">
+                      {debugSession.runs.length} lần chạy • {debugSession.hints.length} gợi ý
+                    </span>
+                  )}
+                </button>
+
+                <button
                   onClick={() => setActiveBottomTab("cheatsheet")}
                   className={`px-3 py-1 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 ${
                     activeBottomTab === "cheatsheet"
@@ -650,16 +832,28 @@ Mình là **Gia sư AI Lập trình Python**.
                 </button>
               </div>
 
-              {activeBottomTab === "output" && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setConsoleOutput("")}
-                  className="text-[11px] text-slate-500 hover:text-slate-300 flex items-center gap-1"
-                  title="Xóa nội dung màn hình kết quả"
+                  type="button"
+                  onClick={() => setShowCompatModal(true)}
+                  className="text-[11px] text-slate-400 hover:text-amber-300 flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60"
+                  title="Xem thông tin môi trường & giới hạn tương thích Python"
                 >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Xóa</span>
+                  <Info className="w-3 h-3 text-amber-400" />
+                  <span>Giới hạn bộ chạy</span>
                 </button>
-              )}
+
+                {activeBottomTab === "output" && (
+                  <button
+                    onClick={() => setConsoleOutput("")}
+                    className="text-[11px] text-slate-500 hover:text-slate-300 flex items-center gap-1"
+                    title="Xóa nội dung màn hình kết quả"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Xóa</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Tab Body */}
@@ -672,9 +866,51 @@ Mình là **Gia sư AI Lập trình Python**.
                       <span>Chưa có kết quả thực thi. Nhấn nút <strong>"Chạy thử (Run)"</strong> ở góc trên để chạy chương trình.</span>
                     </div>
                   ) : (
-                    <pre className={`whitespace-pre-wrap ${isError ? "text-rose-400" : "text-emerald-300"}`}>
-                      {consoleOutput}
-                    </pre>
+                    <div>
+                      <pre className={`whitespace-pre-wrap ${isError ? "text-rose-400" : "text-emerald-300"}`}>
+                        {consoleOutput}
+                      </pre>
+                      {isError && (
+                        <div className="mt-3 p-3 rounded-xl bg-indigo-950/40 border border-indigo-700/60 flex flex-wrap items-center justify-between gap-2.5">
+                          <div className="flex items-center gap-2 text-indigo-200 text-xs font-sans">
+                            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>Mã nguồn phát hiện lỗi. Bạn muốn Gia sư AI hỗ trợ tìm nguyên nhân theo mức độ nào?</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 font-sans">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHintLevel(1);
+                                handleSendAi("Mã nguồn của em bị lỗi khi chạy. Hãy đặt câu hỏi giúp em tự phát hiện nguyên nhân nhé!", 1);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 text-xs font-semibold border border-indigo-700"
+                            >
+                              🔍 Mức 1: Câu hỏi
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHintLevel(2);
+                                handleSendAi("Chương trình của em gặp lỗi. Xin hãy chỉ ra dòng lệnh và nguyên nhân gây lỗi!", 2);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-200 text-xs font-semibold border border-amber-700"
+                            >
+                              📍 Mức 2: Vị trí lỗi
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHintLevel(3);
+                                handleSendAi("Hãy giải thích nguyên lý và cho em một ví dụ tương tự khác nhé!", 3);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 text-xs font-semibold border border-emerald-700"
+                            >
+                              💡 Mức 3: Giải thích & Ví dụ
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -707,24 +943,156 @@ Mình là **Gia sư AI Lập trình Python**.
                 </div>
               )}
 
+              {/* Diary & Student Reflection Tab */}
+              {activeBottomTab === "diary" && (
+                <div className="font-sans space-y-4 text-xs">
+                  {/* Student Reflection Section */}
+                  <div className="p-3.5 bg-slate-900/80 border border-indigo-800/60 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4 text-amber-400" />
+                        <h4 className="font-bold text-white text-sm">Phần học sinh tự giải thích quá trình sửa lỗi</h4>
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        (Bắt buộc để giáo viên đánh giá bài làm)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-amber-300 mb-1">
+                          1. Em gặp lỗi gì?
+                        </label>
+                        <textarea
+                          value={reflection.errorEncountered}
+                          onChange={(e) => setReflection({ ...reflection, errorEncountered: e.target.value })}
+                          placeholder="Ví dụ: Lỗi SyntaxError ở dòng 5 thiếu dấu hai chấm, hoặc vòng lặp while bị lặp vô hạn..."
+                          rows={3}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-sky-300 mb-1">
+                          2. Vì sao xảy ra lỗi?
+                        </label>
+                        <textarea
+                          value={reflection.errorReason}
+                          onChange={(e) => setReflection({ ...reflection, errorReason: e.target.value })}
+                          placeholder="Ví dụ: Do em quên cú pháp câu lệnh if phải có dấu ':', hoặc biến chạy i chưa được tăng giá trị..."
+                          rows={3}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-emerald-300 mb-1">
+                          3. Em đã sửa như thế nào?
+                        </label>
+                        <textarea
+                          value={reflection.howFixed}
+                          onChange={(e) => setReflection({ ...reflection, howFixed: e.target.value })}
+                          placeholder="Ví dụ: Em đã thêm dấu ':' vào cuối dòng 5 và thụt lề 4 dấu cách cho khối lệnh bên trong..."
+                          rows={3}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
+                      <span>Trạng thái phiên: <strong>{debugSession.runs.length}</strong> lần chạy thử | <strong>{debugSession.hints.length}</strong> lần nhận gợi ý AI</span>
+                      {onSubmitWork && (
+                        <button
+                          type="button"
+                          onClick={handleSavePractice}
+                          disabled={isSaving}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>{isSaving ? "Đang lưu..." : "Lưu vào hồ sơ bài nộp"}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {saveSuccess && (
+                      <div className="p-2 bg-emerald-950/80 border border-emerald-700 text-emerald-300 rounded-lg text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>✅ Đã lưu bài nộp và phiên sửa lỗi thành công! Bài đang ở trạng thái <strong>"submitted"</strong> (Chờ giáo viên chấm điểm).</span>
+                      </div>
+                    )}
+
+                    {saveError && (
+                      <div className="p-2 bg-rose-950/80 border border-rose-700 text-rose-300 rounded-lg text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                        <span>{saveError}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Run History List */}
+                  <div>
+                    <h5 className="font-bold text-slate-300 mb-2 flex items-center gap-2">
+                      <Terminal className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Lịch sử các lần chạy thử trong phiên ({debugSession.runs.length})</span>
+                    </h5>
+                    {debugSession.runs.length === 0 ? (
+                      <div className="text-slate-500 italic p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                        Chưa có lần chạy nào. Nhấn "Chạy thử (Run)" để bắt đầu ghi nhận tiến trình.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {debugSession.runs.map((r, i) => (
+                          <div key={r.id || i} className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-slate-300">Lần {debugSession.runs.length - i}</span>
+                                <span className="text-[10px] text-slate-500">{r.timestamp}</span>
+                                {r.passed ? (
+                                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800">Thành công ({r.timeMs}ms)</span>
+                                ) : (
+                                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-950 text-rose-400 border border-rose-800">Có lỗi</span>
+                                )}
+                              </div>
+                              <pre className="text-[11px] text-slate-400 truncate font-mono">
+                                {r.error ? r.error.split("\n")[0] : r.output.slice(0, 100) || "(Không in kết quả)"}
+                              </pre>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCode(r.code);
+                              }}
+                              className="px-2 py-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 shrink-0"
+                              title="Tải lại mã nguồn ở lần chạy này"
+                            >
+                              Khôi phục mã
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {activeBottomTab === "cheatsheet" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-slate-300">
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <div className="font-bold text-amber-400 mb-1">Nhập / Xuất dữ liệu</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-slate-300 font-sans">
+                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 font-mono">
+                    <div className="font-bold text-amber-400 mb-1 font-sans">Nhập / Xuất dữ liệu</div>
                     <code className="block text-[11px] text-slate-300">print("Xin chào", x)</code>
                     <code className="block text-[11px] text-slate-300">x = input() # dạng xâu str</code>
                     <code className="block text-[11px] text-slate-300">a = int(input()) # số nguyên</code>
                     <code className="block text-[11px] text-slate-300">a, b = map(int, input().split())</code>
                   </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <div className="font-bold text-sky-400 mb-1">Rẽ nhánh & Vòng lặp</div>
+                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 font-mono">
+                    <div className="font-bold text-sky-400 mb-1 font-sans">Rẽ nhánh & Vòng lặp</div>
                     <code className="block text-[11px] text-slate-300">if a &gt; 0: ... elif: ... else:</code>
                     <code className="block text-[11px] text-slate-300">for i in range(n): ...</code>
                     <code className="block text-[11px] text-slate-300">for i in range(1, n + 1, 2):</code>
                     <code className="block text-[11px] text-slate-300">while dieu_kien: ...</code>
                   </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <div className="font-bold text-emerald-400 mb-1">Danh sách & Hàm</div>
+                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 font-mono">
+                    <div className="font-bold text-emerald-400 mb-1 font-sans">Danh sách & Hàm</div>
                     <code className="block text-[11px] text-slate-300">a = [1, 2, 3]; a.append(4)</code>
                     <code className="block text-[11px] text-slate-300">len(a), max(a), min(a), sum(a)</code>
                     <code className="block text-[11px] text-slate-300">def tinh_tong(x, y): return x + y</code>
@@ -739,40 +1107,106 @@ Mình là **Gia sư AI Lập trình Python**.
         {/* Right Sidebar: AI Tutor */}
         {isAiOpen && (
           <aside className="w-80 md:w-96 border-l border-slate-800 bg-slate-900/95 flex flex-col shrink-0 z-10">
-            <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+            <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
                   <Bot className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="text-xs font-black text-white">Gia Sư AI Python</h3>
-                  <p className="text-[10px] text-indigo-300">Hướng dẫn cú pháp & giải thuật</p>
+                  <p className="text-[10px] text-indigo-300">Hỗ trợ tự sửa lỗi theo 3 mức độ</p>
                 </div>
               </div>
-              <button
-                onClick={() => setIsAiOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-md text-xs"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAiMessages([
+                      {
+                        id: Date.now().toString(),
+                        role: "assistant",
+                        content: `Hội thoại đã được làm mới. Bạn cần Gia sư AI hỗ trợ gì về mã nguồn Python này?`,
+                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      }
+                    ]);
+                  }}
+                  className="text-slate-400 hover:text-white p-1 rounded-md text-[11px] hover:bg-slate-800 transition-colors"
+                  title="Làm mới cuộc trò chuyện"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setIsAiOpen(false)}
+                  className="text-slate-400 hover:text-white p-1 rounded-md text-xs hover:bg-slate-800 transition-colors"
+                  title="Đóng bảng Gia sư AI"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* 3-Level Hint Selector Controls */}
+            <div className="p-2 border-b border-slate-800 bg-slate-950/70">
+              <div className="text-[10px] font-bold text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>Chọn mức độ trợ giúp sư phạm:</span>
+                <span className="text-indigo-400 font-semibold">Mức {hintLevel}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setHintLevel(1)}
+                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all border ${
+                    hintLevel === 1
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800"
+                  }`}
+                  title="Mức 1: Đặt câu hỏi Socratic giúp học sinh tự nhận ra lỗi"
+                >
+                  🔍 Mức 1: Câu hỏi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHintLevel(2)}
+                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all border ${
+                    hintLevel === 2
+                      ? "bg-amber-600 text-white border-amber-500 shadow-sm"
+                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800"
+                  }`}
+                  title="Mức 2: Chỉ ra vị trí dòng lệnh và nguyên nhân gây lỗi"
+                >
+                  📍 Mức 2: Vị trí lỗi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHintLevel(3)}
+                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all border ${
+                    hintLevel === 3
+                      ? "bg-emerald-600 text-white border-emerald-500 shadow-sm"
+                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800"
+                  }`}
+                  title="Mức 3: Giải thích nguyên lý và cho ví dụ tương tự"
+                >
+                  💡 Mức 3: Ví dụ
+                </button>
+              </div>
             </div>
 
             {/* Quick Prompt Suggestions */}
             <div className="p-2 border-b border-slate-800 bg-slate-950/40 flex flex-wrap gap-1.5">
               <button
-                onClick={() => handleSendAi("Hãy giải thích ý nghĩa từng dòng mã nguồn Python này giúp mình một cách ngắn gọn, dễ hiểu.")}
+                onClick={() => handleSendAi(`Hãy hướng dẫn mình tìm lỗi trong đoạn mã này theo Hướng dẫn Mức ${hintLevel}.`, hintLevel)}
                 className="px-2 py-1 rounded-md text-[11px] font-semibold bg-indigo-950/80 text-indigo-300 border border-indigo-800 hover:bg-indigo-900 transition-colors"
               >
-                💡 Giải thích code
+                🐛 Tìm lỗi (Mức {hintLevel})
               </button>
               <button
-                onClick={() => handleSendAi("Kiểm tra xem mã nguồn này có lỗi cú pháp hoặc logic nào không và hướng dẫn cách khắc phục?")}
-                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-800 hover:bg-rose-900 transition-colors"
+                onClick={() => handleSendAi("Hãy giải thích ý nghĩa các khối lệnh trong mã nguồn này giúp mình một cách ngắn gọn, dễ hiểu.", 3)}
+                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-sky-950/80 text-sky-300 border border-sky-800 hover:bg-sky-900 transition-colors"
               >
-                🐛 Tìm lỗi giúp mình
+                📖 Giải thích code
               </button>
               <button
-                onClick={() => handleSendAi("Gợi ý cách tối ưu thuật toán hoặc cách viết ngắn gọn chuẩn Python (Pythonic) hơn.")}
+                onClick={() => handleSendAi("Gợi ý cách tối ưu thuật toán hoặc cách viết ngắn gọn chuẩn Python hơn mà không làm mất tính dễ đọc.", hintLevel)}
                 className="px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 transition-colors"
               >
                 ⚡ Tối ưu code
@@ -802,12 +1236,38 @@ Mình là **Gia sư AI Lập trình Python**.
                   </div>
                 </div>
               ))}
+
               {isAiThinking && (
                 <div className="flex items-center gap-2 text-indigo-400 text-xs p-2 bg-slate-800/60 rounded-xl w-fit border border-slate-700/60 animate-pulse">
                   <Sparkles className="w-3.5 h-3.5 animate-spin" />
-                  <span>Gia sư AI đang phân tích mã nguồn...</span>
+                  <span>Gia sư AI đang phân tích mã nguồn theo Mức {hintLevel}...</span>
                 </div>
               )}
+
+              {/* Error & Retry Banner */}
+              {aiErrorState && (
+                <div className="p-3 bg-rose-950/80 border border-rose-700/80 rounded-xl text-rose-200 text-xs space-y-2">
+                  <p className="font-semibold">{aiErrorState.message}</p>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSendAi(aiErrorState.lastPrompt, hintLevel)}
+                      className="px-2.5 py-1 bg-rose-700 hover:bg-rose-600 text-white rounded font-bold text-[11px] flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Thử lại</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSendAi(aiErrorState.lastPrompt, hintLevel, true)}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded font-bold text-[11px] border border-amber-600/50"
+                    >
+                      💡 Xem gợi ý có sẵn
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div ref={aiBottomRef} />
             </div>
 
@@ -824,7 +1284,7 @@ Mình là **Gia sư AI Lập trình Python**.
                       handleSendAi();
                     }
                   }}
-                  placeholder="Hỏi Gia sư AI về bài tập, cú pháp..."
+                  placeholder={`Hỏi Gia sư AI (Đang áp dụng Mức ${hintLevel})...`}
                   className="flex-1 bg-transparent px-2 text-xs text-white placeholder-slate-500 focus:outline-none"
                 />
                 <button
@@ -839,6 +1299,71 @@ Mình là **Gia sư AI Lập trình Python**.
           </aside>
         )}
       </div>
+
+      {/* Compatibility Notice Modal */}
+      {showCompatModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Info className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-base text-white">Giới Hạn & Tương Thích Môi Trường Python</h3>
+              </div>
+              <button
+                onClick={() => setShowCompatModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300">
+              <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="font-bold text-white mb-1">Bộ máy thực thi:</div>
+                <div className="text-emerald-400 font-mono">{PYTHON_RUNTIME_COMPATIBILITY_INFO.engineName} ({PYTHON_RUNTIME_COMPATIBILITY_INFO.version})</div>
+              </div>
+
+              <div>
+                <div className="font-bold text-emerald-400 mb-1 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Tính năng hỗ trợ đầy đủ:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-300 pl-1">
+                  {PYTHON_RUNTIME_COMPATIBILITY_INFO.supportedFeatures.map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-bold text-rose-400 mb-1 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Các tính năng & thư viện chưa hỗ trợ:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-400 pl-1">
+                  {PYTHON_RUNTIME_COMPATIBILITY_INFO.unsupportedFeatures.map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="p-2.5 bg-amber-950/40 border border-amber-700/60 rounded-xl text-amber-200">
+                <strong>Giới hạn an toàn:</strong> Thời gian chạy tối đa {PYTHON_RUNTIME_COMPATIBILITY_INFO.limits.maxExecutionTimeMs / 1000}s (ngăn chặn vòng lặp vô hạn làm đơ máy), giới hạn đầu ra {PYTHON_RUNTIME_COMPATIBILITY_INFO.limits.maxOutputChars.toLocaleString()} ký tự.
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowCompatModal(false)}
+                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold"
+              >
+                Đã hiểu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

@@ -6,24 +6,61 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Users collection (allows student authentication, profile updates, and batch account imports)
+    function isTeacher() {
+      return isSignedIn() && (
+        request.auth.token.email == 'nmnhat.n98@gmail.com' ||
+        request.auth.token.role == 'teacher' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher')
+      );
+    }
+
+    // Users collection (Profiles)
     match /users/{userId} {
-      allow read, write: if true;
+      // Authenticated users can read profiles (e.g. for collaboration or student list in class)
+      allow read: if isSignedIn();
+      // User can create their own profile, or teacher can create/import
+      allow create: if isSignedIn() && (request.auth.uid == userId || isTeacher());
+      // Students cannot change their role to teacher
+      allow update: if isSignedIn() && (
+        isTeacher() ||
+        (request.auth.uid == userId && request.resource.data.role == resource.data.role)
+      );
+      allow delete: if isTeacher();
     }
 
     // Classes collection
     match /classes/{classId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
     }
 
-    // Lessons collection (Scratch, Python, Web HTML, Robotics projects)
+    // Lessons collection
     match /lessons/{lessonId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isTeacher();
     }
 
-    // Submissions collection (student work, automated test results, teacher grading & feedback)
+    // Submissions collection
     match /submissions/{submissionId} {
-      allow read, write: if true;
+      // Students can only read their own submissions; teachers can read all
+      allow read: if isSignedIn() && (
+        isTeacher() ||
+        resource.data.studentId == request.auth.uid ||
+        resource.data.studentEmail == request.auth.token.email
+      );
+      // Students can create submissions for themselves; teacher can create
+      allow create: if isSignedIn() && (
+        request.resource.data.studentId == request.auth.uid ||
+        isTeacher()
+      );
+      // Students can update their own un-graded submissions; teachers can grade
+      allow update: if isSignedIn() && (
+        isTeacher() ||
+        (resource.data.studentId == request.auth.uid && resource.data.status != 'graded')
+      );
+      allow delete: if isTeacher();
     }
   }
 }
+

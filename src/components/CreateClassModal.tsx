@@ -68,7 +68,7 @@ export const CreateClassModal: React.FC<CreateClassModalProps> = ({
       setClassSection("10A2");
       setSubjectFocus("Lập trình Python (Tin học 10 GDPT 2018)");
       setClassName("Lớp 10A2 - Lập trình Python (Tin học 10 GDPT 2018)");
-      setDescription("Chương trình Tin học 10 chuẩn GDPT 2018: Biến, hàm, kiểu dữ liệu, danh sách và các thuật toán tìm kiếm, sắp xếp.");
+      setDescription("Chương trình Lập trình Python lớp 10 (Nội dung thực hành): Biến, hàm, kiểu dữ liệu, danh sách và các thuật toán tìm kiếm, sắp xếp.");
     } else {
       setGradeNumber(0);
       setClassSection("CLB-STEM-02");

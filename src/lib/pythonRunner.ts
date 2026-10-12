@@ -43,6 +43,29 @@ export interface TestCasesRunResult {
   engine: "browser-wasm" | "server-python" | "server-cpp";
 }
 
+export const PYTHON_RUNTIME_COMPATIBILITY_INFO = {
+  engineName: "Skulpt In-Browser Python 3 Core",
+  version: "Python 3.x Core Subsystem",
+  supportedFeatures: [
+    "Cú pháp lệnh Python 3 tiêu chuẩn",
+    "Nhập xuất dữ liệu: input(), print(), f-string",
+    "Cấu trúc rẽ nhánh: if, elif, else",
+    "Cấu trúc lặp: for, while, break, continue",
+    "Hàm con & thủ tục: def, return, lambda",
+    "Cấu trúc dữ liệu: list, tuple, dict, set, str",
+    "Thư viện chuẩn cơ bản: math (sqrt, isqrt, sin, cos, gcd), random"
+  ],
+  unsupportedFeatures: [
+    "Cú pháp match-case mới của Python 3.10+",
+    "Thư viện mở rộng C-extensions: numpy, pandas, matplotlib, scipy, pygame",
+    "Socket mạng, multithreading, filesystem truy cập đĩa cứng"
+  ],
+  limits: {
+    maxExecutionTimeMs: 4000,
+    maxOutputChars: 25000,
+  }
+};
+
 let skulptLoadingPromise: Promise<void> | null = null;
 
 /**
@@ -122,10 +145,18 @@ export async function runPythonInBrowser(code: string, stdin: string = ""): Prom
   const stdinLines = stdin ? stdin.split(/\r?\n/) : [];
   let stdinLineIdx = 0;
 
+  const MAX_OUTPUT_LEN = PYTHON_RUNTIME_COMPATIBILITY_INFO.limits.maxOutputChars;
+  let isOutputTruncated = false;
+
   // Cấu hình môi trường thực thi Skulpt
   Sk.configure({
     output: (text: string) => {
-      capturedStdout += text;
+      if (capturedStdout.length < MAX_OUTPUT_LEN) {
+        capturedStdout += text;
+      } else if (!isOutputTruncated) {
+        capturedStdout += "\n⚠️ [Hệ thống]: Đầu ra vượt quá giới hạn 25.000 ký tự và đã được tự động cắt bớt để bảo vệ giao diện!";
+        isOutputTruncated = true;
+      }
     },
     read: (filename: string) => {
       if (Sk.builtinFiles === undefined || Sk.builtinFiles["files"][filename] === undefined) {

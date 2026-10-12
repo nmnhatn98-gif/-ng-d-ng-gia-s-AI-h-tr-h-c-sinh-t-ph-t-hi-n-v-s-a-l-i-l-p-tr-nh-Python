@@ -126,11 +126,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </h1>
 
           <p className="text-sm font-semibold text-white/90 mt-1">
-            Không Gian Tin Học & Lập Trình Chuẩn GDPT 2018
+            Không Gian Tin Học & Lập Trình Python
           </p>
 
           <p className="text-xs sm:text-sm text-white/80 mt-2 leading-relaxed max-w-2xl">
-            Tài khoản của bạn được thiết lập theo đúng chương trình Tin học chuẩn Quốc gia. Hệ thống gợi ý từ 1 đến 2 chuyên đề trọng tâm nhất của khối lớp, cùng các phòng thực hành Python và HTML tự do không giới hạn.
+            Tài khoản của bạn được thiết lập theo chuyên đề môn Tin học. Hệ thống gợi ý từ 1 đến 2 chuyên đề trọng tâm nhất của khối lớp, cùng phòng thực hành Python có gia sư AI hỗ trợ tự phát hiện và sửa lỗi.
           </p>
 
           {/* Quick Metrics */}

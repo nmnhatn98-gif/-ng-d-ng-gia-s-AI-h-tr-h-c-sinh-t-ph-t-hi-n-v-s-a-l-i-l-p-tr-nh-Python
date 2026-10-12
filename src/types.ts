@@ -124,6 +124,7 @@ export interface Submission {
     codeFileName?: string;
     codeFileContent?: string;
     projectDescription?: string;
+    debugSession?: DebugSession;
   };
   score: number;
   maxScore: number;
@@ -132,6 +133,62 @@ export interface Submission {
   teacherFeedback?: string;
   submittedAt: string;
   gradedAt?: string;
+  evaluation?: TeacherDebugEvaluation;
+}
+
+export interface DebugRunItem {
+  id: string;
+  timestamp: string;
+  code: string;
+  stdin: string;
+  output: string;
+  error?: string;
+  timeMs?: number;
+  passed?: boolean;
+}
+
+export interface AiHintItem {
+  id: string;
+  timestamp: string;
+  level: 1 | 2 | 3;
+  prompt: string;
+  response: string;
+  source: "ai" | "fallback";
+}
+
+export interface StudentReflection {
+  errorEncountered: string; // Em gặp lỗi gì?
+  errorReason: string;       // Vì sao xảy ra lỗi?
+  howFixed: string;          // Em đã sửa như thế nào?
+}
+
+export interface TeacherDebugEvaluation {
+  errorIdentification: number; // Tiêu chí 1: Xác định lỗi (0 - 2.5đ)
+  reasonExplanation: number;   // Tiêu chí 2: Giải thích nguyên nhân (0 - 2.5đ)
+  correctFix: number;          // Tiêu chí 3: Sửa đúng (0 - 2.5đ)
+  application: number;         // Tiêu chí 4: Vận dụng (0 - 2.5đ)
+  totalScore: number;          // Tổng 10 điểm
+  feedback: string;
+  approvedByTeacher: boolean;
+  gradedAt?: string;
+}
+
+export interface DebugSession {
+  sessionId: string;
+  studentId: string;
+  studentCode?: string;
+  studentName?: string;
+  lessonId: string;
+  lessonTitle: string;
+  startedAt: string;
+  finishedAt?: string;
+  initialCode: string;
+  finalCode: string;
+  runs: DebugRunItem[];
+  hints: AiHintItem[];
+  reflection?: StudentReflection;
+  evaluation?: TeacherDebugEvaluation;
+  saveStatus?: "idle" | "saving" | "saved" | "error";
 }
 
 export interface ClassItem {

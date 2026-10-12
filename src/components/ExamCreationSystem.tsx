@@ -577,7 +577,7 @@ D. Lặp vô hạn không dừng
                 )}
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Hệ thống số hóa đề thi thông minh, hỗ trợ nhận dạng File & Ảnh chụp chuẩn GDPT 2018
+                Hệ thống số hóa đề thi thông minh, hỗ trợ nhận dạng File & Ảnh chụp đề kiểm tra Tin học
               </p>
             </div>
           </div>

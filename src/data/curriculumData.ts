@@ -1,7 +1,7 @@
 import { CurriculumTopic } from "../types";
 
 /**
- * Gợi ý nội dung chương trình Tin học chuẩn GDPT 2018 từ Khối 1 đến Khối 12.
+ * Gợi ý nội dung tham khảo chương trình Tin học từ Khối 1 đến Khối 12.
  * Mỗi khối lớp có ĐÚNG 1 - 2 nội dung trọng tâm theo chuẩn chương trình của Bộ GD&ĐT.
  */
 export const GRADE_CURRICULUM_TOPICS: CurriculumTopic[] = [
@@ -329,7 +329,7 @@ export const GRADE_CURRICULUM_TOPICS: CurriculumTopic[] = [
     orderIndex: 1,
     title: "Lập trình Python thực hành: Cú pháp, Biến, Cấu trúc rẽ nhánh & Vòng lặp",
     gdptCode: "Chủ đề F: Lập trình với Python (Tin học 10 GDPT 2018 - Định hướng CS & ICT)",
-    description: "Chương trình Tin học 10 chuẩn GDPT 2018: Làm chủ cú pháp ngôn ngữ lập trình bậc cao Python. Biến, hằng, các kiểu dữ liệu int, float, bool, str; toán tử số học và logic; cấu trúc rẽ nhánh if - elif - else lồng nhau; vòng lặp for i in range() và vòng lặp có điều kiện while.",
+    description: "Chương trình Tin học 10 (Chủ đề Lập trình Python): Làm chủ cú pháp ngôn ngữ lập trình bậc cao Python. Biến, hằng, các kiểu dữ liệu int, float, bool, str; toán tử số học và logic; cấu trúc rẽ nhánh if - elif - else lồng nhau; vòng lặp for i in range() và vòng lặp có điều kiện while.",
     outcomes: [
       "Hiểu cơ chế thực thi của thông dịch viên Python, quy tắc đặt tên biến và kiểu dữ liệu động.",
       "Viết chương trình xử lý rẽ nhánh phức tạp: Giải phương trình bậc nhất, giải phương trình bậc hai, phân loại hình học tam giác.",

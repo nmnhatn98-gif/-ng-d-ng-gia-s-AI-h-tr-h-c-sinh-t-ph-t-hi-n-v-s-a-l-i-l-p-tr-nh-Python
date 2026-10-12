@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Lesson, Submission, ClassItem, RubricCriteria, GradeLevel, UserProfile } from "../types";
+import { Lesson, Submission, ClassItem, RubricCriteria, GradeLevel, UserProfile, TeacherDebugEvaluation } from "../types";
 import { 
   Home,
   FileText,
@@ -44,7 +44,10 @@ import {
   LogOut,
   GraduationCap,
   Paperclip,
-  FileCode
+  FileCode,
+  Terminal,
+  Bot,
+  MessageSquare
 } from "lucide-react";
 import { QuizCreatorModal } from "./QuizCreatorModal";
 import { ExamCreationSystem } from "./ExamCreationSystem";
@@ -128,6 +131,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [rubricTechnique, setRubricTechnique] = useState<number>(8);
   const [rubricPresentation, setRubricPresentation] = useState<number>(8);
 
+  // 4 Evaluation Criteria for Python Debugging & AI Tutoring
+  const [evalErrorId, setEvalErrorId] = useState<number>(2.5);
+  const [evalReason, setEvalReason] = useState<number>(2.5);
+  const [evalFix, setEvalFix] = useState<number>(2.5);
+  const [evalApply, setEvalApply] = useState<number>(2.5);
+
   // Filter Submissions
   const filteredSubmissions = submissions.filter((sub) => {
     const matchStatus = submissionFilter === "all" || sub.status === submissionFilter;
@@ -144,6 +153,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setGradingSub(sub);
     setGradeScore(sub.score || 8);
     setGradeFeedback(sub.teacherFeedback || "");
+    if (sub.evaluation) {
+      setEvalErrorId(sub.evaluation.errorIdentification);
+      setEvalReason(sub.evaluation.reasonExplanation);
+      setEvalFix(sub.evaluation.correctFix);
+      setEvalApply(sub.evaluation.application);
+    } else {
+      setEvalErrorId(2.5);
+      setEvalReason(2.0);
+      setEvalFix(2.5);
+      setEvalApply(2.0);
+    }
     if (sub.rubric) {
       setRubricIdea(sub.rubric.idea);
       setRubricTechnique(sub.rubric.technique);
@@ -158,7 +178,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleSaveQuickGrade = async () => {
     if (!gradingSub) return;
     const isRobotics = gradingSub.moduleType === "robotics";
-    const totalScore = isRobotics ? rubricIdea + rubricTechnique + rubricPresentation : gradeScore;
+    const hasDebugSession = Boolean(gradingSub.content.debugSession);
+    const pythonTotal = Number((evalErrorId + evalReason + evalFix + evalApply).toFixed(1));
+    const totalScore = hasDebugSession 
+      ? pythonTotal 
+      : (isRobotics ? rubricIdea + rubricTechnique + rubricPresentation : gradeScore);
+
+    const evaluationData: TeacherDebugEvaluation = {
+      errorIdentification: evalErrorId,
+      reasonExplanation: evalReason,
+      correctFix: evalFix,
+      application: evalApply,
+      totalScore: pythonTotal,
+      feedback: gradeFeedback,
+      approvedByTeacher: true,
+      gradedAt: new Date().toISOString(),
+    };
 
     await onGradeSubmission(
       gradingSub.id,
@@ -171,7 +206,112 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       totalScore,
       gradeFeedback
     );
+
+    // Sync evaluation details to backend
+    try {
+      await fetch(`/api/submissions/${gradingSub.id}/grade`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          score: totalScore,
+          rubric: {
+            idea: rubricIdea,
+            technique: rubricTechnique,
+            presentation: rubricPresentation,
+            feedback: gradeFeedback,
+          },
+          evaluation: evaluationData,
+          teacherFeedback: gradeFeedback,
+        }),
+      });
+    } catch (e) {
+      console.warn("Backend grade sync:", e);
+    }
+
     setGradingSub(null);
+  };
+
+  // Export Anonymized Evidence CSV (UTF-8 with BOM)
+  const handleExportEvidenceCsv = () => {
+    const pythonSubs = submissions.filter((s) => s.moduleType === "coding" || s.content.debugSession);
+    const targetSubs = pythonSubs.length > 0 ? pythonSubs : submissions;
+
+    const headers = [
+      "Mã học sinh",
+      "Bài tập",
+      "Thời gian bắt đầu",
+      "Thời gian hoàn thành",
+      "Số lần chạy thử",
+      "Số gợi ý AI đã nhận",
+      "Tiêu chí 1: Xác định lỗi (2.5đ)",
+      "Tiêu chí 2: Giải thích nguyên nhân (2.5đ)",
+      "Tiêu chí 3: Sửa đúng (2.5đ)",
+      "Tiêu chí 4: Vận dụng (2.5đ)",
+      "Tổng điểm (10đ)",
+      "Đánh giá của giáo viên",
+      "Trạng thái chấm",
+      "Nội dung học sinh: Em gặp lỗi gì",
+      "Nội dung học sinh: Vì sao lỗi",
+      "Nội dung học sinh: Đã sửa thế nào",
+      "Mã ban đầu",
+      "Mã cuối cùng"
+    ];
+
+    const rows = targetSubs.map((sub) => {
+      const sess = sub.content.debugSession;
+      const evalObj = sub.evaluation;
+      const studentCode = sess?.studentCode || sub.studentId || "HS-ANON";
+      const lessonTitle = sub.lessonTitle.replace(/"/g, '""');
+      const start = sess?.startedAt || sub.submittedAt;
+      const finish = sess?.finishedAt || sub.submittedAt;
+      const runCount = sess?.runs ? sess.runs.length : 0;
+      const hintCount = sess?.hints ? sess.hints.length : 0;
+      const c1 = evalObj?.errorIdentification ?? "";
+      const c2 = evalObj?.reasonExplanation ?? "";
+      const c3 = evalObj?.correctFix ?? "";
+      const c4 = evalObj?.application ?? "";
+      const totalScore = sub.status === "graded" ? sub.score : "Chờ chấm";
+      const feedback = (sub.teacherFeedback || evalObj?.feedback || "").replace(/"/g, '""');
+      const status = sub.status === "graded" ? "Đã chấm" : "Chờ chấm";
+      const refWhat = (sess?.reflection?.errorEncountered || "").replace(/"/g, '""');
+      const refWhy = (sess?.reflection?.errorReason || "").replace(/"/g, '""');
+      const refHow = (sess?.reflection?.howFixed || "").replace(/"/g, '""');
+      const initCode = (sess?.initialCode || "").replace(/"/g, '""');
+      const finalCode = (sess?.finalCode || sub.content.code || "").replace(/"/g, '""');
+
+      return [
+        `"${studentCode}"`,
+        `"${lessonTitle}"`,
+        `"${start}"`,
+        `"${finish}"`,
+        runCount,
+        hintCount,
+        c1,
+        c2,
+        c3,
+        c4,
+        totalScore,
+        `"${feedback}"`,
+        `"${status}"`,
+        `"${refWhat}"`,
+        `"${refWhy}"`,
+        `"${refHow}"`,
+        `"${initCode}"`,
+        `"${finalCode}"`
+      ].join(",");
+    });
+
+    // Prepend UTF-8 BOM so Excel opens Vietnamese characters correctly without encoding issues
+    const csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `minh_chung_sua_loi_python_${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleCreateLesson = async (e: React.FormEvent) => {
@@ -571,7 +711,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         <span className="text-2xl">👋</span>
                       </h2>
                       <p className="text-xs sm:text-sm text-blue-100/90 font-medium leading-relaxed">
-                        Hỗ trợ soạn bài tập lập trình Scratch/Python/Web, tạo đề trắc nghiệm AI và theo dõi kết quả học tập học sinh chuẩn GDPT 2018.
+                        Hỗ trợ soạn bài tập lập trình Scratch/Python/Web, tạo đề trắc nghiệm AI và theo dõi kết quả học tập lập trình của học sinh theo các tiêu chí sư phạm.
                       </p>
                     </div>
 
@@ -1073,14 +1213,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 ))}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsCreateAssignmentOpen(true)}
-                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all ml-auto sm:ml-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tạo bài tập mới</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportEvidenceCsv}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                  title="Xuất bảng đối chiếu & nhật ký sửa lỗi Python dạng file CSV UTF-8"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Xuất Minh Chứng CSV</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsCreateAssignmentOpen(true)}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all ml-auto sm:ml-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Tạo bài tập mới</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1698,123 +1850,295 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {/* MODAL: GRADING SUBMISSION */}
       {gradingSub && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
               <div>
-                <h3 className="font-black text-base text-slate-900">
-                  Chấm Bài: {gradingSub.studentName}
+                <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
+                  <span>Chấm Bài: {gradingSub.studentName}</span>
+                  {gradingSub.content.debugSession && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-indigo-50 text-indigo-700 font-bold border border-indigo-200">
+                      Phiên Gia Sư AI & Sửa Lỗi
+                    </span>
+                  )}
                 </h3>
-                <p className="text-xs text-slate-500">{gradingSub.lessonTitle}</p>
+                <p className="text-xs text-slate-500">
+                  {gradingSub.lessonTitle} • Mã HS: <span className="font-bold text-slate-700">{gradingSub.content.debugSession?.studentCode || gradingSub.studentId}</span>
+                </p>
               </div>
               <button
                 onClick={() => setGradingSub(null)}
-                className="text-slate-400 hover:text-slate-700 text-sm font-bold"
+                className="text-slate-400 hover:text-slate-700 text-sm font-bold p-1 rounded-lg hover:bg-slate-100"
               >
                 ✕
               </button>
             </div>
 
-            {/* Content Preview */}
-            <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs font-mono max-h-40 overflow-y-auto">
-              {gradingSub.content.code && (
-                <div>
-                  <div className="text-slate-400 mb-1 font-sans font-bold">Mã nguồn nộp ({gradingSub.content.language}):</div>
-                  <pre className="text-slate-800 whitespace-pre-wrap">{gradingSub.content.code}</pre>
+            {/* Python Debug Session Details */}
+            {gradingSub.content.debugSession ? (
+              <div className="space-y-4 mb-5">
+                {/* 1. Diff: Initial Code vs Final Code */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs">
+                  <div className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                    <Code2 className="w-4 h-4 text-indigo-600" />
+                    <span>Đối chiếu mã nguồn: Ban đầu vs Sau khi sửa</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-mono text-[11px]">
+                    <div>
+                      <div className="text-[10px] text-slate-500 font-bold font-sans mb-1">Mã ban đầu:</div>
+                      <pre className="p-2 bg-slate-900 text-slate-300 rounded-lg max-h-36 overflow-y-auto whitespace-pre-wrap">
+                        {gradingSub.content.debugSession.initialCode || "(Trống)"}
+                      </pre>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-emerald-600 font-bold font-sans mb-1">Mã nộp cuối cùng:</div>
+                      <pre className="p-2 bg-slate-900 text-emerald-300 rounded-lg max-h-36 overflow-y-auto whitespace-pre-wrap">
+                        {gradingSub.content.debugSession.finalCode || gradingSub.content.code || "(Trống)"}
+                      </pre>
+                    </div>
+                  </div>
                 </div>
-              )}
-              {gradingSub.content.videoUrl && (
-                <div className="font-sans mb-1">
-                  <span className="text-slate-500">Video sản phẩm: </span>
-                  <a href={gradingSub.content.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">
-                    {gradingSub.content.videoUrl}
-                  </a>
-                </div>
-              )}
-              {gradingSub.content.projectDescription && (
-                <div className="font-sans text-slate-700 mt-1">
-                  {gradingSub.content.projectDescription}
-                </div>
-              )}
-            </div>
 
-            {/* Robotics Rubric vs Standard Score */}
-            {gradingSub.moduleType === "robotics" ? (
-              <div className="space-y-4 mb-4">
-                <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-800 mb-1">
-                    <span>1. Ý tưởng (0 - 10đ):</span>
-                    <span className="text-amber-600">{rubricIdea}/10</span>
+                {/* 2. Run Attempts & AI Hints Summary */}
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100">
+                    <div className="text-indigo-900 font-bold flex items-center gap-1.5 mb-1">
+                      <Terminal className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Các lần chạy thử: {gradingSub.content.debugSession.runs?.length || 0} lần</span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 space-y-1 max-h-24 overflow-y-auto">
+                      {gradingSub.content.debugSession.runs?.slice(0, 3).map((r, i) => (
+                        <div key={i} className="truncate">
+                          • {r.timestamp}: {r.passed ? "✅ Chạy tốt" : `❌ ${r.error?.split("\n")[0] || "Lỗi"}`}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    value={rubricIdea}
-                    onChange={(e) => setRubricIdea(Number(e.target.value))}
-                    className="w-full accent-amber-500"
-                  />
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-800 mb-1">
-                    <span>2. Kỹ thuật (0 - 10đ):</span>
-                    <span className="text-sky-600">{rubricTechnique}/10</span>
+
+                  <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-100">
+                    <div className="text-amber-900 font-bold flex items-center gap-1.5 mb-1">
+                      <Bot className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Gợi ý AI đã nhận: {gradingSub.content.debugSession.hints?.length || 0} lượt</span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 space-y-1 max-h-24 overflow-y-auto">
+                      {gradingSub.content.debugSession.hints?.map((h, i) => (
+                        <div key={i} className="truncate">
+                          • Mức {h.level}: {h.prompt.slice(0, 35)}...
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    value={rubricTechnique}
-                    onChange={(e) => setRubricTechnique(Number(e.target.value))}
-                    className="w-full accent-sky-500"
-                  />
                 </div>
-                <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-800 mb-1">
-                    <span>3. Trình bày (0 - 10đ):</span>
-                    <span className="text-emerald-600">{rubricPresentation}/10</span>
+
+                {/* 3. Student Self-Reflection Answers */}
+                <div className="p-3.5 bg-amber-50/50 rounded-2xl border border-amber-200/80 text-xs space-y-2">
+                  <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <MessageSquare className="w-4 h-4 text-amber-600" />
+                    <span>Phần học sinh tự trả lời & giải thích lỗi:</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    value={rubricPresentation}
-                    onChange={(e) => setRubricPresentation(Number(e.target.value))}
-                    className="w-full accent-emerald-500"
-                  />
+                  <div className="space-y-1.5 pl-1">
+                    <div>
+                      <strong className="text-amber-800">1. Em gặp lỗi gì?</strong>
+                      <p className="text-slate-800 italic mt-0.5 pl-2 border-l-2 border-amber-300">
+                        {gradingSub.content.debugSession.reflection?.errorEncountered || "(Học sinh chưa điền nội dung này)"}
+                      </p>
+                    </div>
+                    <div>
+                      <strong className="text-sky-800">2. Vì sao xảy ra lỗi?</strong>
+                      <p className="text-slate-800 italic mt-0.5 pl-2 border-l-2 border-sky-300">
+                        {gradingSub.content.debugSession.reflection?.errorReason || "(Học sinh chưa điền nội dung này)"}
+                      </p>
+                    </div>
+                    <div>
+                      <strong className="text-emerald-800">3. Em đã sửa như thế nào?</strong>
+                      <p className="text-slate-800 italic mt-0.5 pl-2 border-l-2 border-emerald-300">
+                        {gradingSub.content.debugSession.reflection?.howFixed || "(Học sinh chưa điền nội dung này)"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-2.5 bg-slate-900 text-white rounded-xl flex items-center justify-between text-xs font-bold">
-                  <span>Tổng điểm Rubric:</span>
-                  <span className="text-amber-400 font-black text-sm">
-                    {rubricIdea + rubricTechnique + rubricPresentation} / 30 điểm
-                  </span>
+
+                {/* 4. 4-Criteria Evaluation Rubric */}
+                <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <span className="font-bold text-xs text-amber-400 uppercase tracking-wide">
+                      Đánh giá 4 Tiêu chí chuyên môn (Thang 10đ)
+                    </span>
+                    <span className="font-black text-sm text-emerald-400">
+                      Tổng: {(evalErrorId + evalReason + evalFix + evalApply).toFixed(1)} / 10.0đ
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold text-slate-300">
+                        <span>1. Xác định lỗi (0 - 2.5đ):</span>
+                        <span className="text-amber-400 font-bold">{evalErrorId}đ</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2.5"
+                        step="0.5"
+                        value={evalErrorId}
+                        onChange={(e) => setEvalErrorId(Number(e.target.value))}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold text-slate-300">
+                        <span>2. Giải thích nguyên nhân (0 - 2.5đ):</span>
+                        <span className="text-sky-400 font-bold">{evalReason}đ</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2.5"
+                        step="0.5"
+                        value={evalReason}
+                        onChange={(e) => setEvalReason(Number(e.target.value))}
+                        className="w-full accent-sky-500"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold text-slate-300">
+                        <span>3. Sửa đúng (0 - 2.5đ):</span>
+                        <span className="text-emerald-400 font-bold">{evalFix}đ</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2.5"
+                        step="0.5"
+                        value={evalFix}
+                        onChange={(e) => setEvalFix(Number(e.target.value))}
+                        className="w-full accent-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold text-slate-300">
+                        <span>4. Vận dụng (0 - 2.5đ):</span>
+                        <span className="text-purple-400 font-bold">{evalApply}đ</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2.5"
+                        step="0.5"
+                        value={evalApply}
+                        onChange={(e) => setEvalApply(Number(e.target.value))}
+                        className="w-full accent-purple-500"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div className="mb-4">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Điểm số (Thang 10):
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  step="0.5"
-                  value={gradeScore}
-                  onChange={(e) => setGradeScore(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+              /* Standard Preview for Non-Python sessions */
+              <div>
+                <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs font-mono max-h-40 overflow-y-auto">
+                  {gradingSub.content.code && (
+                    <div>
+                      <div className="text-slate-400 mb-1 font-sans font-bold">Mã nguồn nộp ({gradingSub.content.language}):</div>
+                      <pre className="text-slate-800 whitespace-pre-wrap">{gradingSub.content.code}</pre>
+                    </div>
+                  )}
+                  {gradingSub.content.videoUrl && (
+                    <div className="font-sans mb-1">
+                      <span className="text-slate-500">Video sản phẩm: </span>
+                      <a href={gradingSub.content.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">
+                        {gradingSub.content.videoUrl}
+                      </a>
+                    </div>
+                  )}
+                  {gradingSub.content.projectDescription && (
+                    <div className="font-sans text-slate-700 mt-1">
+                      {gradingSub.content.projectDescription}
+                    </div>
+                  )}
+                </div>
+
+                {gradingSub.moduleType === "robotics" ? (
+                  <div className="space-y-4 mb-4">
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-slate-800 mb-1">
+                        <span>1. Ý tưởng (0 - 10đ):</span>
+                        <span className="text-amber-600">{rubricIdea}/10</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={rubricIdea}
+                        onChange={(e) => setRubricIdea(Number(e.target.value))}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-slate-800 mb-1">
+                        <span>2. Kỹ thuật (0 - 10đ):</span>
+                        <span className="text-sky-600">{rubricTechnique}/10</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={rubricTechnique}
+                        onChange={(e) => setRubricTechnique(Number(e.target.value))}
+                        className="w-full accent-sky-500"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-slate-800 mb-1">
+                        <span>3. Trình bày (0 - 10đ):</span>
+                        <span className="text-emerald-600">{rubricPresentation}/10</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={rubricPresentation}
+                        onChange={(e) => setRubricPresentation(Number(e.target.value))}
+                        className="w-full accent-emerald-500"
+                      />
+                    </div>
+                    <div className="p-2.5 bg-slate-900 text-white rounded-xl flex items-center justify-between text-xs font-bold">
+                      <span>Tổng điểm Rubric:</span>
+                      <span className="text-amber-400 font-black text-sm">
+                        {rubricIdea + rubricTechnique + rubricPresentation} / 30 điểm
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Điểm số (Thang 10):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.5"
+                      value={gradeScore}
+                      onChange={(e) => setGradeScore(Number(e.target.value))}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
             <div className="mb-5">
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Lời phê và nhận xét của giáo viên:
+                Lời phê và nhận xét chính thức của giáo viên:
               </label>
               <textarea
                 rows={3}
                 value={gradeFeedback}
                 onChange={(e) => setGradeFeedback(e.target.value)}
-                placeholder="Nhận xét ưu điểm và hướng dẫn cải thiện..."
+                placeholder="Nhận xét cụ thể mức độ tiến bộ, chỉ ra điểm tích cực trong cách học sinh sửa lỗi..."
                 className="w-full p-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -1828,9 +2152,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </button>
               <button
                 onClick={handleSaveQuickGrade}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs flex items-center gap-1.5"
               >
-                Lưu Đánh Giá
+                <CheckCircle className="w-3.5 h-3.5" />
+                <span>Duyệt & Lưu Kết Quả Chấm Điểm</span>
               </button>
             </div>
           </div>
@@ -2214,7 +2539,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 rounded-2xl p-4 text-white mb-4 shadow-sm">
               <div className="text-[11px] font-bold text-white/80">Trạng thái mô hình AI</div>
               <div className="text-xl font-black mt-0.5">Gemini 2.5 Pro Giáo Dục</div>
-              <div className="text-[11px] text-white/80 mt-1">Đã tích hợp chuẩn GDPT 2018 môn Tin học (Tiểu học, THCS, THPT)</div>
+              <div className="text-[11px] text-white/80 mt-1">Nội dung tham khảo môn Tin học (Tiểu học, THCS, THPT)</div>
             </div>
 
             <div className="space-y-2.5 mb-5 text-xs">

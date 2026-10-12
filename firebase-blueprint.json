@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["teacher", "student"]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["email", "role", "name"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "A class taught by a teacher.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "teacherId": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "teacherId"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "A lesson in a class.",
+      "type": "object",
+      "properties": {
+        "classId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "moduleType": {
+          "type": "string",
+          "enum": ["elementary", "programming", "robotics"]
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": ["classId", "title", "moduleType"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "A student's submission for a lesson.",
+      "type": "object",
+      "properties": {
+        "lessonId": {
+          "type": "string"
+        },
+        "studentId": {
+          "type": "string"
+        },
+        "studentName": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "rubric": {
+          "type": "object",
+          "properties": {
+            "idea": { "type": "number" },
+            "technique": { "type": "number" },
+            "presentation": { "type": "number" }
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["submitted", "graded"]
+        }
+      },
+      "required": ["lessonId", "studentId", "status"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles. Anyone can read their own, teachers can read all."
+    },
+    "classes/{classId}": {
+      "schema": "Class",
+      "description": "Classes. Anyone can read, teachers can create/update."
+    },
+    "lessons/{lessonId}": {
+      "schema": "Lesson",
+      "description": "Lessons within classes. Anyone can read, teachers can create/update."
+    },
+    "submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Student submissions. Students can read/create/update their own. Teachers can read all and update grades."
+    }
+  }
+}

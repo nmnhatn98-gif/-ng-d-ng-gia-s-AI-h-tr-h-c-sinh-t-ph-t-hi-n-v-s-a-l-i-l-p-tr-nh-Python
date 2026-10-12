@@ -1,0 +1,6 @@
+{
+  "name": "LMS Tin Học & STEM",
+  "description": "Hệ thống quản lý học tập môn Tin học và STEM đa cấp học, hỗ trợ lập trình C++/Python, dự án Robotics, và tích hợp AI Assistant (Gemini).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

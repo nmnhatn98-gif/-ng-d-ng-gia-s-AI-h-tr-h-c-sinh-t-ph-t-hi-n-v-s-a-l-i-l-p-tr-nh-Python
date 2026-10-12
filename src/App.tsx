@@ -1,0 +1,892 @@
+import React, { useState, useEffect } from "react";
+import { Navbar } from "./components/Navbar";
+import { StudentDashboard } from "./components/StudentDashboard";
+import { TeacherDashboard } from "./components/TeacherDashboard";
+import { Leaderboard } from "./components/Leaderboard";
+import { ElementaryModule } from "./components/ElementaryModule";
+import { CodingModule } from "./components/CodingModule";
+import { RoboticsModule } from "./components/RoboticsModule";
+import { QuizModule } from "./components/QuizModule";
+import { HtmlEditorModule } from "./components/HtmlEditorModule";
+import { PythonLabModule } from "./components/PythonLabModule";
+import { LoginModal } from "./components/LoginModal";
+import { AuthPage } from "./components/AuthPage";
+import { 
+  Lesson, 
+  Submission, 
+  ClassItem, 
+  UserProfile, 
+  GradeLevel, 
+  RubricCriteria,
+  UserRole 
+} from "./types";
+import { 
+  INITIAL_LESSONS, 
+  INITIAL_CLASSES, 
+  INITIAL_SUBMISSIONS 
+} from "./data/mockData";
+import { db } from "./firebase";
+import { 
+  collection, 
+  getDocs, 
+  setDoc, 
+  doc, 
+  updateDoc, 
+  deleteDoc 
+} from "firebase/firestore";
+import { syncStudentsWithCloud, isMockStudent } from "./data/studentService";
+
+const MOCK_CLASS_IDS = new Set([
+  "cls-th-01",
+  "cls-thcs-01",
+  "cls-thpt-10",
+  "cls-thpt-01",
+  "cls-stem-01",
+]);
+
+function isMockClass(cls: ClassItem | null | undefined): boolean {
+  if (!cls || !cls.id) return false;
+  if (MOCK_CLASS_IDS.has(cls.id)) return true;
+  if (
+    cls.id.startsWith("cls-th-") ||
+    cls.id.startsWith("cls-thcs-") ||
+    cls.id.startsWith("cls-thpt-") ||
+    cls.id.startsWith("cls-stem-")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function App() {
+  // Current user state (Học sinh or Giáo viên) - Load from localStorage if present
+  // Mặc định null: Khi truy cập link lần đầu, trang đầu tiên luôn là trang Đăng ký / Đăng nhập
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem("lms_current_user");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.role === "student" && isMockStudent(parsed)) {
+          localStorage.removeItem("lms_current_user");
+          return null;
+        }
+        return parsed;
+      }
+    } catch (e) {
+      console.warn("Could not read saved user:", e);
+    }
+    return null;
+  });
+
+  // Guest exploration mode
+  const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
+
+  // Login Modal State
+  const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
+  const [loginInitialRole, setLoginInitialRole] = useState<UserRole>("student");
+
+  const [activeTab, setActiveTab] = useState<string>("lessons");
+  const [selectedLevel, setSelectedLevel] = useState<GradeLevel | "all">("all");
+  const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
+
+  // App Data State
+  const [lessons, setLessons] = useState<Lesson[]>(() => {
+    try {
+      const saved = localStorage.getItem("lms_lessons");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load lessons from localStorage:", e);
+    }
+    return INITIAL_LESSONS;
+  });
+  const [submissions, setSubmissions] = useState<Submission[]>(() => {
+    try {
+      const saved = localStorage.getItem("lms_submissions");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load submissions from localStorage:", e);
+    }
+    return INITIAL_SUBMISSIONS;
+  });
+  const [classes, setClasses] = useState<ClassItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("lms_classes");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: ClassItem) => !isMockClass(c));
+          if (cleaned.length !== parsed.length) {
+            try {
+              localStorage.setItem("lms_classes", JSON.stringify(cleaned));
+            } catch (e) {}
+          }
+          return cleaned;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load classes from localStorage:", e);
+    }
+    return INITIAL_CLASSES;
+  });
+  const [notification, setNotification] = useState<{ message: string; type: "success" | "info" } | null>(null);
+
+  // Show Toast
+  const showToast = (message: string, type: "success" | "info" = "success") => {
+    setNotification({ message, type });
+    setTimeout(() => {
+      setNotification(null);
+    }, 4000);
+  };
+
+  // Open Login with pre-selected role portal
+  const handleOpenLogin = (role: UserRole = "student") => {
+    setLoginInitialRole(role);
+    setIsLoginOpen(true);
+  };
+
+  // User Selection / Login completion handler
+  const handleSelectUser = (user: UserProfile) => {
+    setCurrentUser(user);
+    setIsGuestMode(false);
+    setIsLoginOpen(false);
+    try {
+      localStorage.setItem("lms_current_user", JSON.stringify(user));
+    } catch (e) {
+      console.warn("Could not persist user session:", e);
+    }
+
+    if (user.role === "teacher") {
+      setActiveTab("teacher-admin");
+      showToast(`👨‍🏫 Đã đăng nhập Cổng Giáo Viên: ${user.displayName}`);
+    } else {
+      setActiveTab("lessons");
+      if (user.gradeLevel) {
+        setSelectedLevel(user.gradeLevel);
+      }
+      showToast(`👨‍🎓 Đã đăng nhập Cổng Học Sinh: ${user.displayName}`);
+    }
+  };
+
+  // Effective active user (guaranteed non-null for downstream components)
+  const activeUser: UserProfile = currentUser || {
+    uid: "guest-explorer",
+    displayName: "Khách Tham Quan",
+    email: "guest@lms.edu.vn",
+    role: "student",
+    gradeLevel: "middle",
+    classGrade: "Khách Trải Nghiệm",
+    school: "Trường Phổ Thông",
+    studentCode: "GUEST",
+    isGoogleLinked: false,
+    createdAt: new Date().toISOString(),
+  };
+
+  // Logout Handler - Clears user and returns to Login/Register Page
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem("lms_current_user");
+    } catch (e) {
+      console.warn("Logout note:", e);
+    }
+    setCurrentUser(null);
+    setIsGuestMode(false);
+    setSelectedLesson(null);
+    setIsLoginOpen(false);
+    showToast("Đã đăng xuất tài khoản. Bạn đã quay lại trang Đăng ký / Đăng nhập.");
+  };
+
+  // Sync data from Server Disk & Firestore on mount
+  useEffect(() => {
+    const loadPersistentData = async () => {
+      // 1. Đồng bộ tài khoản học sinh hai chiều (Server Disk + Firestore + LocalStorage)
+      try {
+        await syncStudentsWithCloud();
+      } catch (err) {
+        console.warn("Student multi-layer sync notice:", err);
+      }
+
+      // 2. Đồng bộ bài nộp của học sinh từ Server Disk
+      try {
+        const srvRes = await fetch("/api/submissions");
+        if (srvRes.ok) {
+          const srvData = await srvRes.json();
+          if (Array.isArray(srvData.submissions) && srvData.submissions.length > 0) {
+            setSubmissions(srvData.submissions);
+          }
+        }
+      } catch (srvErr) {
+        console.warn("Server submissions fetch notice:", srvErr);
+      }
+
+      // 3. Đồng bộ từ Cloud Firestore (nếu có bản ghi mới hơn)
+      try {
+        // Load lessons if present in firestore
+        const lessonsSnap = await getDocs(collection(db, "lessons"));
+        if (!lessonsSnap.empty) {
+          const loadedLessons = lessonsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Lesson));
+          const loadedMap = new Map(loadedLessons.map((l) => [l.id, l]));
+          const mergedLessons = [
+            ...INITIAL_LESSONS.map((initL) => loadedMap.get(initL.id) || initL),
+            ...loadedLessons.filter((l) => !INITIAL_LESSONS.some((initL) => initL.id === l.id)),
+          ];
+          setLessons(mergedLessons);
+        }
+
+        // Load submissions if present in firestore
+        const subSnap = await getDocs(collection(db, "submissions"));
+        if (!subSnap.empty) {
+          const loadedSubs = subSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Submission));
+          setSubmissions((prev) => {
+            const map = new Map(prev.map((s) => [s.id, s]));
+            loadedSubs.forEach((sub) => map.set(sub.id, sub));
+            return Array.from(map.values());
+          });
+        }
+
+        // Load classes if present in firestore
+        const classesSnap = await getDocs(collection(db, "classes"));
+        if (!classesSnap.empty) {
+          const loadedClasses = classesSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as ClassItem))
+            .filter((c) => !isMockClass(c));
+          setClasses(loadedClasses);
+          try {
+            localStorage.setItem("lms_classes", JSON.stringify(loadedClasses));
+          } catch (e) {
+            console.warn("Storage save classes error:", e);
+          }
+        }
+      } catch (err) {
+        console.warn("Firestore sync fallback:", err);
+      }
+    };
+
+    loadPersistentData();
+  }, []);
+
+  // Role Toggle
+  const handleRoleChange = (role: "teacher" | "student") => {
+    if (role === "teacher") {
+      handleSelectUser({
+        uid: "teacher-main-01",
+        email: "nmnhat.n98@gmail.com",
+        displayName: "Thầy Nguyễn Minh Nhật",
+        role: "teacher",
+        gradeLevel: "high",
+        classGrade: "Tổ trưởng Chuyên môn Tin học & STEM",
+        school: "Phòng Giáo Dục & Đào Tạo",
+        studentCode: "GV-STEM-01",
+        isGoogleLinked: true,
+        googleEmail: "nmnhat.n98@gmail.com",
+      });
+      setActiveTab("teacher-admin");
+      showToast("Đã chuyển sang Cổng Giáo Viên");
+    } else {
+      handleSelectUser({
+        uid: "student-main-01",
+        email: "hocsinh@stem.edu.vn",
+        displayName: "Học sinh STEM",
+        role: "student",
+        gradeLevel: "middle",
+        classGrade: "Lớp 7A1",
+        school: "Trường THCS Lê Quý Đôn",
+        studentCode: "HS-7A1-01",
+      });
+      setActiveTab("lessons");
+      showToast("Đã chuyển sang Cổng Học Sinh");
+    }
+  };
+
+  // Submit Work Handler
+  const handleSubmitWork = async (submissionData: Partial<Submission>) => {
+    const newId = `sub-${Date.now()}`;
+    const newSubmission: Submission = {
+      id: newId,
+      lessonId: submissionData.lessonId || "",
+      lessonTitle: submissionData.lessonTitle || "",
+      studentId: activeUser.uid,
+      studentName: activeUser.displayName,
+      studentEmail: activeUser.email,
+      moduleType: submissionData.moduleType || "coding",
+      content: submissionData.content || {},
+      score: submissionData.score ?? 0,
+      maxScore: submissionData.maxScore ?? 10,
+      rubric: submissionData.rubric,
+      status: submissionData.status || "submitted",
+      teacherFeedback: submissionData.teacherFeedback || "",
+      submittedAt: new Date().toISOString(),
+    };
+
+    // Update local state
+    setSubmissions((prev) => [newSubmission, ...prev]);
+
+    // Persist to Server Disk Storage
+    try {
+      await fetch("/api/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSubmission),
+      });
+    } catch (srvErr) {
+      console.warn("Server save submission notice:", srvErr);
+    }
+
+    // Persist to Firestore
+    try {
+      await setDoc(doc(db, "submissions", newId), newSubmission);
+      showToast("🎉 Nộp bài thành công! Dữ liệu đã được lưu trữ an toàn");
+    } catch (e) {
+      console.warn("Firestore save fallback:", e);
+      showToast("Bài làm đã được ghi nhận trên hệ thống!");
+    }
+  };
+
+  // Grade Submission Handler
+  const handleGradeSubmission = async (
+    submissionId: string,
+    rubric: RubricCriteria,
+    score: number,
+    feedback: string
+  ) => {
+    const gradedAt = new Date().toISOString();
+
+    setSubmissions((prev) =>
+      prev.map((sub) =>
+        sub.id === submissionId
+          ? {
+              ...sub,
+              rubric,
+              score,
+              status: "graded",
+              teacherFeedback: feedback,
+              gradedAt,
+            }
+          : sub
+      )
+    );
+
+    // Persist grade to Server Disk Storage
+    try {
+      await fetch(`/api/submissions/${submissionId}/grade`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ score, rubric, teacherFeedback: feedback }),
+      });
+    } catch (srvErr) {
+      console.warn("Server update grade notice:", srvErr);
+    }
+
+    // Persist to Firestore
+    try {
+      await updateDoc(doc(db, "submissions", submissionId), {
+        rubric,
+        score,
+        status: "graded",
+        teacherFeedback: feedback,
+        gradedAt,
+      });
+      showToast("✅ Đã lưu kết quả chấm điểm và nhận xét!");
+    } catch (e) {
+      console.warn("Firestore update fallback:", e);
+      showToast("Đã lưu điểm bài nộp!");
+    }
+  };
+
+  // Add Lesson / Assignment Handler
+  const handleAddLesson = async (newLessonData: Partial<Lesson>) => {
+    const newId = `les-${Date.now()}`;
+    const newLesson: Lesson = {
+      id: newId,
+      title: newLessonData.title || "Bài tập mới",
+      description: newLessonData.description || "",
+      level: newLessonData.level || "middle",
+      moduleType: newLessonData.moduleType || "coding",
+      language: newLessonData.language || "python",
+      starterCode: newLessonData.starterCode,
+      htmlStarter: newLessonData.htmlStarter,
+      cssStarter: newLessonData.cssStarter,
+      jsStarter: newLessonData.jsStarter,
+      scratchProjectId: newLessonData.scratchProjectId,
+      testcases: newLessonData.testcases,
+      rubricTemplate: newLessonData.rubricTemplate,
+      durationMinutes: newLessonData.durationMinutes || 45,
+      questions: newLessonData.questions,
+      gradeName: newLessonData.gradeName,
+      subject: newLessonData.subject || "Tin học",
+      purpose: newLessonData.purpose,
+      startDate: newLessonData.startDate,
+      dueDate: newLessonData.dueDate,
+      targetClasses: newLessonData.targetClasses,
+      attachments: newLessonData.attachments,
+      richContent: newLessonData.richContent,
+      submissionType: newLessonData.submissionType || "file_upload",
+      maxScore: newLessonData.maxScore ?? 10,
+      allowReviewAfterDue: newLessonData.allowReviewAfterDue ?? true,
+      createdAt: new Date().toISOString(),
+    };
+
+    setLessons((prev) => {
+      const updated = [newLesson, ...prev];
+      try {
+        localStorage.setItem("lms_lessons", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Storage save error:", e);
+      }
+      return updated;
+    });
+
+    try {
+      await setDoc(doc(db, "lessons", newId), newLesson);
+      showToast("🎉 Đã tạo và giao bài tập mới thành công!");
+    } catch (e) {
+      console.warn("Firestore save fallback:", e);
+      showToast("Đã thêm bài tập vào danh sách!");
+    }
+  };
+
+  // Delete Lesson Handler
+  const handleDeleteLesson = async (lessonId: string) => {
+    if (!confirm("Bạn có chắc chắn muốn xóa bài học này khỏi ngân hàng đề?")) return;
+    setLessons((prev) => {
+      const updated = prev.filter((l) => l.id !== lessonId);
+      try {
+        localStorage.setItem("lms_lessons", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Storage save error:", e);
+      }
+      return updated;
+    });
+
+    try {
+      await deleteDoc(doc(db, "lessons", lessonId));
+      showToast("Đã xóa bài học.");
+    } catch (e) {
+      console.warn("Firestore delete fallback:", e);
+    }
+  };
+
+  // Add Class Handler
+  const handleAddClass = async (newClass: ClassItem) => {
+    setClasses((prev) => {
+      const updated = [newClass, ...prev];
+      try {
+        localStorage.setItem("lms_classes", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Storage save error:", e);
+      }
+      return updated;
+    });
+
+    try {
+      await setDoc(doc(db, "classes", newClass.id), newClass);
+      showToast(`Đã tạo lớp mới thành công: ${newClass.name}`);
+    } catch (e) {
+      console.warn("Firestore save class fallback:", e);
+      showToast(`Đã tạo lớp ${newClass.name}!`);
+    }
+  };
+
+  // Delete Class Handler
+  const handleDeleteClass = async (classId: string) => {
+    setClasses((prev) => {
+      const updated = prev.filter((c) => c.id !== classId);
+      try {
+        localStorage.setItem("lms_classes", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Storage save error:", e);
+      }
+      return updated;
+    });
+
+    try {
+      await deleteDoc(doc(db, "classes", classId));
+      showToast("Đã xóa lớp học thành công.");
+    } catch (e) {
+      console.warn("Firestore delete class fallback:", e);
+    }
+  };
+
+  // Khi người dùng bấm vào link lần đầu hoặc chưa đăng nhập: Trang đầu tiên hiển thị luôn là Trang Đăng Ký / Đăng Nhập
+  if (!currentUser && !isGuestMode) {
+    return (
+      <div className="min-h-screen bg-slate-900 font-sans">
+        {notification && (
+          <div className="fixed bottom-5 right-5 z-50 bg-slate-800 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-bounce">
+            <span>{notification.message}</span>
+          </div>
+        )}
+        <AuthPage
+          onSelectUser={handleSelectUser}
+          onExploreAsGuest={() => {
+            setIsGuestMode(true);
+            showToast("Đang ở Chế độ Khách (Xem trước danh mục bài giảng)", "info");
+          }}
+        />
+      </div>
+    );
+  }
+
+  // Render Module View if lesson selected
+  if (selectedLesson) {
+    if (selectedLesson.moduleType === "quiz") {
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+          {isGuestMode && !currentUser && (
+            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+              <span className="flex items-center gap-2">
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span>Bạn đang xem trước bài học. Đăng nhập để ghi nhận điểm số chính thức.</span>
+              </span>
+              <button
+                onClick={() => {
+                  setIsGuestMode(false);
+                  handleOpenLogin("student");
+                }}
+                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+              >
+                Đăng Nhập / Đăng Ký →
+              </button>
+            </div>
+          )}
+          <Navbar
+            currentUser={activeUser}
+            onRoleChange={handleRoleChange}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            selectedLevel={selectedLevel}
+            setSelectedLevel={setSelectedLevel}
+            onOpenLogin={handleOpenLogin}
+            onLogout={handleLogout}
+            submissions={submissions}
+            onSelectLessonById={(id) => {
+              const target = lessons.find((l) => l.id === id);
+              if (target) setSelectedLesson(target);
+            }}
+          />
+          <QuizModule
+            lesson={selectedLesson}
+            currentUser={activeUser}
+            onBack={() => setSelectedLesson(null)}
+            onSubmitWork={handleSubmitWork}
+          />
+          <LoginModal
+            isOpen={isLoginOpen}
+            onClose={() => setIsLoginOpen(false)}
+            onSelectUser={handleSelectUser}
+            initialRole={loginInitialRole}
+          />
+        </div>
+      );
+    }
+
+    if (selectedLesson.moduleType === "scratch") {
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+          {isGuestMode && !currentUser && (
+            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+              <span className="flex items-center gap-2">
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span>Bạn đang xem trước bài học. Đăng nhập để nộp dự án Scratch!</span>
+              </span>
+              <button
+                onClick={() => {
+                  setIsGuestMode(false);
+                  handleOpenLogin("student");
+                }}
+                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+              >
+                Đăng Nhập / Đăng Ký →
+              </button>
+            </div>
+          )}
+          <Navbar
+            currentUser={activeUser}
+            onRoleChange={handleRoleChange}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            selectedLevel={selectedLevel}
+            setSelectedLevel={setSelectedLevel}
+            onOpenLogin={handleOpenLogin}
+            onLogout={handleLogout}
+            submissions={submissions}
+            onSelectLessonById={(id) => {
+              const target = lessons.find((l) => l.id === id);
+              if (target) setSelectedLesson(target);
+            }}
+          />
+          <ElementaryModule
+            lesson={selectedLesson}
+            currentUser={activeUser}
+            onBack={() => setSelectedLesson(null)}
+            onSubmitWork={handleSubmitWork}
+          />
+          <LoginModal
+            isOpen={isLoginOpen}
+            onClose={() => setIsLoginOpen(false)}
+            onSelectUser={handleSelectUser}
+            initialRole={loginInitialRole}
+          />
+        </div>
+      );
+    }
+
+    if (selectedLesson.moduleType === "coding") {
+      return (
+        <div className="min-h-screen bg-slate-950 font-sans">
+          {isGuestMode && !currentUser && (
+            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+              <span className="flex items-center gap-2">
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span>Bạn đang xem trước bài lập trình. Đăng nhập để lưu mã nguồn và chấm điểm!</span>
+              </span>
+              <button
+                onClick={() => {
+                  setIsGuestMode(false);
+                  handleOpenLogin("student");
+                }}
+                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+              >
+                Đăng Nhập / Đăng Ký →
+              </button>
+            </div>
+          )}
+          <CodingModule
+            lesson={selectedLesson}
+            currentUser={activeUser}
+            onBack={() => setSelectedLesson(null)}
+            onSubmitWork={handleSubmitWork}
+          />
+          <LoginModal
+            isOpen={isLoginOpen}
+            onClose={() => setIsLoginOpen(false)}
+            onSelectUser={handleSelectUser}
+            initialRole={loginInitialRole}
+          />
+        </div>
+      );
+    }
+
+    if (selectedLesson.moduleType === "html") {
+      return (
+        <div className="min-h-screen bg-slate-950 font-sans">
+          {isGuestMode && !currentUser && (
+            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+              <span className="flex items-center gap-2">
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span>Bạn đang xem trước bài viết mã HTML. Đăng nhập để lưu dự án và gửi giáo viên chấm!</span>
+              </span>
+              <button
+                onClick={() => {
+                  setIsGuestMode(false);
+                  handleOpenLogin("student");
+                }}
+                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+              >
+                Đăng Nhập / Đăng Ký →
+              </button>
+            </div>
+          )}
+          <HtmlEditorModule
+            lesson={selectedLesson}
+            currentUser={activeUser}
+            onBack={() => setSelectedLesson(null)}
+            onSubmitWork={handleSubmitWork}
+          />
+          <LoginModal
+            isOpen={isLoginOpen}
+            onClose={() => setIsLoginOpen(false)}
+            onSelectUser={handleSelectUser}
+            initialRole={loginInitialRole}
+          />
+        </div>
+      );
+    }
+
+    if (selectedLesson.moduleType === "robotics") {
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+          {isGuestMode && !currentUser && (
+            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+              <span className="flex items-center gap-2">
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span>Bạn đang xem trước dự án Robotics STEM. Đăng nhập để nộp video và nhật ký!</span>
+              </span>
+              <button
+                onClick={() => {
+                  setIsGuestMode(false);
+                  handleOpenLogin("student");
+                }}
+                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+              >
+                Đăng Nhập / Đăng Ký →
+              </button>
+            </div>
+          )}
+          <Navbar
+            currentUser={activeUser}
+            onRoleChange={handleRoleChange}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            selectedLevel={selectedLevel}
+            setSelectedLevel={setSelectedLevel}
+            onOpenLogin={handleOpenLogin}
+            onLogout={handleLogout}
+            submissions={submissions}
+            onSelectLessonById={(id) => {
+              const target = lessons.find((l) => l.id === id);
+              if (target) setSelectedLesson(target);
+            }}
+          />
+          <RoboticsModule
+            lesson={selectedLesson}
+            currentUser={activeUser}
+            submissions={submissions}
+            onBack={() => setSelectedLesson(null)}
+            onSubmitWork={handleSubmitWork}
+            onGradeSubmission={handleGradeSubmission}
+          />
+          <LoginModal
+            isOpen={isLoginOpen}
+            onClose={() => setIsLoginOpen(false)}
+            onSelectUser={handleSelectUser}
+            initialRole={loginInitialRole}
+          />
+        </div>
+      );
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* Toast Notification */}
+      {notification && (
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-bounce">
+          <span>{notification.message}</span>
+        </div>
+      )}
+
+      {/* Guest Mode Banner */}
+      {isGuestMode && !currentUser && (
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex flex-wrap items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
+              Chế độ Khách (Xem trước)
+            </span>
+            <span>
+              Bạn đang trải nghiệm hệ thống STEM LMS K12. Đăng nhập hoặc tạo tài khoản để nộp bài và tích lũy điểm!
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setIsGuestMode(false);
+              handleOpenLogin("student");
+            }}
+            className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+          >
+            Đăng Nhập / Đăng Ký →
+          </button>
+        </div>
+      )}
+
+      {/* Main Navbar (shown for student/learner views; teacher dashboard has its own neat Azota workspace layout) */}
+      {activeTab !== "teacher-admin" && (
+        <Navbar
+          currentUser={activeUser}
+          onRoleChange={handleRoleChange}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          selectedLevel={selectedLevel}
+          setSelectedLevel={setSelectedLevel}
+          onOpenLogin={handleOpenLogin}
+          onLogout={handleLogout}
+          submissions={submissions}
+          onSelectLessonById={(id) => {
+            const target = lessons.find((l) => l.id === id);
+            if (target) setSelectedLesson(target);
+          }}
+        />
+      )}
+
+      {/* Body Views */}
+      <main className={activeTab === "html-lab" || activeTab === "python-lab" || activeTab === "teacher-admin" ? "" : "pb-16"}>
+        {activeTab === "lessons" && (
+          <StudentDashboard
+            lessons={lessons}
+            submissions={submissions}
+            currentUser={activeUser}
+            selectedLevel={selectedLevel}
+            onSelectLesson={(lesson) => setSelectedLesson(lesson)}
+            onOpenHtmlLab={() => setActiveTab("html-lab")}
+            onOpenPythonLab={() => setActiveTab("python-lab")}
+          />
+        )}
+
+        {activeTab === "python-lab" && (
+          <div className="h-[calc(100vh-65px)] bg-slate-950">
+            <PythonLabModule
+              currentUser={activeUser}
+              onBack={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
+              onSubmitWork={handleSubmitWork}
+            />
+          </div>
+        )}
+
+        {activeTab === "html-lab" && (
+          <div className="h-[calc(100vh-65px)] bg-slate-950">
+            <HtmlEditorModule
+              currentUser={activeUser}
+              onBack={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
+              onSubmitWork={handleSubmitWork}
+            />
+          </div>
+        )}
+
+        {activeTab === "leaderboard" && (
+          <Leaderboard
+            submissions={submissions}
+            currentUser={activeUser}
+          />
+        )}
+
+        {activeTab === "teacher-admin" && (
+          <TeacherDashboard
+            lessons={lessons}
+            submissions={submissions}
+            classes={classes}
+            currentUser={activeUser}
+            onAddLesson={handleAddLesson}
+            onDeleteLesson={handleDeleteLesson}
+            onGradeSubmission={handleGradeSubmission}
+            onAddClass={handleAddClass}
+            onDeleteClass={handleDeleteClass}
+            onSwitchToStudent={() => setActiveTab("lessons")}
+            onOpenPythonLab={() => setActiveTab("python-lab")}
+            onOpenHtmlLab={() => setActiveTab("html-lab")}
+            onLogout={handleLogout}
+            onOpenLogin={handleOpenLogin}
+          />
+        )}
+      </main>
+
+      {/* Login & Portal Switcher Modal */}
+      <LoginModal
+        isOpen={isLoginOpen}
+        onClose={() => setIsLoginOpen(false)}
+        onSelectUser={handleSelectUser}
+        initialRole={loginInitialRole}
+      />
+    </div>
+  );
+}
+export default App;

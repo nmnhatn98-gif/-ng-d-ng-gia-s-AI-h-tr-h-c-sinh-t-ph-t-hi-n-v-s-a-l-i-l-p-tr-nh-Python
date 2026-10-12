@@ -25,7 +25,7 @@ import {
   INITIAL_CLASSES, 
   INITIAL_SUBMISSIONS 
 } from "./data/mockData";
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
 import { 
   collection, 
   getDocs, 
@@ -308,11 +308,12 @@ export function App() {
     }
   };
 
-  // Submit Work Handler
-  const handleSubmitWork = async (submissionData: Partial<Submission>) => {
-    const newId = `sub-${Date.now()}`;
+  // Submit Work Handler (Primary Server Disk Verification + No Duplicate on Retry + Score Null for Ungraded)
+  const handleSubmitWork = async (submissionData: Partial<Submission>): Promise<void> => {
+    // Preserve existing submission ID if retrying, otherwise create a new one
+    const subId = submissionData.id || `sub-${Date.now()}`;
     const newSubmission: Submission = {
-      id: newId,
+      id: subId,
       lessonId: submissionData.lessonId || "",
       lessonTitle: submissionData.lessonTitle || "",
       studentId: activeUser.uid,
@@ -320,36 +321,56 @@ export function App() {
       studentEmail: activeUser.email,
       moduleType: submissionData.moduleType || "coding",
       content: submissionData.content || {},
-      score: submissionData.score ?? 0,
+      // Ungraded submissions must have score: null (Never 0 or 10)
+      score: submissionData.status === "graded" && typeof submissionData.score === "number" ? submissionData.score : null,
       maxScore: submissionData.maxScore ?? 10,
       rubric: submissionData.rubric,
       status: submissionData.status || "submitted",
       teacherFeedback: submissionData.teacherFeedback || "",
-      submittedAt: new Date().toISOString(),
+      submittedAt: submissionData.submittedAt || new Date().toISOString(),
+      evaluation: submissionData.evaluation,
     };
 
-    // Update local state
-    setSubmissions((prev) => [newSubmission, ...prev]);
-
-    // Persist to Server Disk Storage
+    // Primary Storage: Verify server API persistence first
     try {
-      await fetch("/api/submissions", {
+      const token = await auth.currentUser?.getIdToken();
+      const srvRes = await fetch("/api/submissions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(newSubmission),
       });
-    } catch (srvErr) {
-      console.warn("Server save submission notice:", srvErr);
+
+      if (!srvRes.ok) {
+        const errData = await srvRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Máy chủ lưu bài trả về lỗi (${srvRes.status})`);
+      }
+    } catch (srvErr: any) {
+      console.error("Primary server save submission failed:", srvErr);
+      // Re-throw so caller (PythonLabModule) can display error and preserve student code for retry
+      throw new Error(srvErr.message || "Không thể lưu bài nộp lên máy chủ. Vui lòng bấm thử lại.");
     }
 
-    // Persist to Firestore
+    // Secondary Storage: Firestore & Local State
     try {
-      await setDoc(doc(db, "submissions", newId), newSubmission);
-      showToast("🎉 Nộp bài thành công! Dữ liệu đã được lưu trữ an toàn");
+      await setDoc(doc(db, "submissions", subId), newSubmission);
     } catch (e) {
-      console.warn("Firestore save fallback:", e);
-      showToast("Bài làm đã được ghi nhận trên hệ thống!");
+      console.warn("Firestore sync notice (offline or rules):", e);
     }
+
+    setSubmissions((prev) => {
+      const existsIndex = prev.findIndex((s) => s.id === subId);
+      if (existsIndex >= 0) {
+        const updated = [...prev];
+        updated[existsIndex] = newSubmission;
+        return updated;
+      }
+      return [newSubmission, ...prev];
+    });
+
+    showToast("🎉 Nộp bài thành công! Bài làm đang chờ giáo viên đánh giá");
   };
 
   // Grade Submission Handler
@@ -360,6 +381,25 @@ export function App() {
     feedback: string
   ) => {
     const gradedAt = new Date().toISOString();
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`/api/submissions/${submissionId}/grade`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ score, rubric, teacherFeedback: feedback }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Lỗi lưu điểm (${res.status})`);
+      }
+    } catch (srvErr: any) {
+      console.error("Server update grade notice:", srvErr);
+      showToast(srvErr.message || "Lỗi lưu điểm lên máy chủ", "info");
+    }
 
     setSubmissions((prev) =>
       prev.map((sub) =>
@@ -375,17 +415,6 @@ export function App() {
           : sub
       )
     );
-
-    // Persist grade to Server Disk Storage
-    try {
-      await fetch(`/api/submissions/${submissionId}/grade`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score, rubric, teacherFeedback: feedback }),
-      });
-    } catch (srvErr) {
-      console.warn("Server update grade notice:", srvErr);
-    }
 
     // Persist to Firestore
     try {

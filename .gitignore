@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime persistence data & accounts
+data/
+server_data/
+students_vault.json
+teachers.json
+*.json.bak
+

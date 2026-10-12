@@ -66,8 +66,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   // Bài nộp của học sinh
   const mySubmissions = submissions.filter((s) => s.studentId === currentUser.uid);
-  const completedCount = mySubmissions.filter((s) => s.status === "graded").length;
-  const totalScore = mySubmissions.reduce((sum, s) => sum + (s.score || 0), 0);
+  const gradedSubs = mySubmissions.filter((s) => s.status === "graded" && typeof s.score === "number");
+  const completedCount = gradedSubs.length;
+  const totalScore = gradedSubs.reduce((sum, s) => sum + (s.score as number), 0);
 
   // Nhóm các khối lớp theo 3 cấp học
   const elementaryGrades = [1, 2, 3, 4, 5];

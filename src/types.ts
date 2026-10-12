@@ -126,7 +126,7 @@ export interface Submission {
     projectDescription?: string;
     debugSession?: DebugSession;
   };
-  score: number;
+  score: number | null;
   maxScore: number;
   rubric?: RubricCriteria;
   status: "submitted" | "graded";

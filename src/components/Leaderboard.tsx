@@ -34,8 +34,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ submissions, currentUs
       };
     }
     const student = studentMap[sub.studentId];
-    if (sub.status === "graded") {
-      student.totalScore += sub.score || 0;
+    if (sub.status === "graded" && typeof sub.score === "number") {
+      student.totalScore += sub.score;
       student.completedLessons += 1;
     }
   });
@@ -49,9 +49,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ submissions, currentUs
     st.badges = badges;
   });
 
-  // Add current user if student and has at least 1 submission or is a student logged in
+  // Add current user if student and has at least 1 graded submission
   if (currentUser && currentUser.role === "student" && !studentMap[currentUser.uid]) {
-    const userSubs = submissions.filter((s) => s.studentId === currentUser.uid);
+    const userSubs = submissions.filter((s) => s.studentId === currentUser.uid && s.status === "graded" && typeof s.score === "number");
     const scoreSum = userSubs.reduce((acc, curr) => acc + (curr.score || 0), 0);
     if (userSubs.length > 0) {
       studentMap[currentUser.uid] = {

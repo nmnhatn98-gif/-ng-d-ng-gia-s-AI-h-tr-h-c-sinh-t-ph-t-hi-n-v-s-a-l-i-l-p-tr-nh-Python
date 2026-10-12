@@ -20,7 +20,7 @@ import {
   Cpu,
   Layers
 } from "lucide-react";
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase";
 import { registerNewStudent, getStoredStudents, syncStudentsWithCloud, lookupStudentOnline, restoreFromStudentVault } from "../data/studentService";
 
@@ -143,15 +143,36 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const gUser = result.user;
+      const token = await gUser.getIdToken();
 
-      const isTeacherRole =
-        gUser.email === "nmnhat.n98@gmail.com" || activePortal === "teacher";
+      // Verify role from server with idToken
+      let verifiedRole: UserRole = "student";
+      try {
+        const verifyRes = await fetch("/api/auth/verify-role", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (verifyRes.ok) {
+          const roleData = await verifyRes.json();
+          if (roleData.role === "teacher") {
+            verifiedRole = "teacher";
+          }
+        }
+      } catch (e) {
+        console.warn("Verify role check failed:", e);
+      }
+
+      const isTeacherRole = verifiedRole === "teacher";
+
+      if (activePortal === "teacher" && !isTeacherRole) {
+        setAuthError(`Tài khoản Google (${gUser.email}) chưa được phân quyền Giáo viên bởi Quản trị viên.`);
+        return;
+      }
 
       const newUser: UserProfile = {
         uid: gUser.uid,
         email: gUser.email || "user@gmail.com",
         displayName: gUser.displayName || (isTeacherRole ? "Thầy Cô Giáo" : "Học sinh STEM"),
-        role: isTeacherRole ? "teacher" : "student",
+        role: verifiedRole,
         gradeLevel: isTeacherRole ? "high" : selectedGradeLevel,
         classGrade: isTeacherRole ? "Cán bộ Giảng dạy Tin học" : selectedClass || "Lớp 7A1",
         school: isTeacherRole ? "Tổ chuyên môn Tin học & STEM" : studentSchool,
@@ -343,27 +364,66 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     }
   };
 
-  // Teacher Login
-  const handleTeacherLogin = (e: React.FormEvent) => {
+  // Teacher Login with Firebase Authentication & server-side role verification
+  const handleTeacherLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacherName.trim() && !teacherEmail.trim()) {
-      setAuthError("Vui lòng nhập Họ tên hoặc Email của Giáo viên!");
+    const email = teacherEmail.trim().toLowerCase();
+    const password = teacherPin.trim();
+
+    if (!email) {
+      setAuthError("Vui lòng nhập Email của Giáo viên để xác thực danh tính!");
+      return;
+    }
+    if (!password) {
+      setAuthError("Vui lòng nhập Mật khẩu tài khoản Giáo viên!");
       return;
     }
 
-    const newTeacher: UserProfile = {
-      uid: `tch-custom-${Date.now()}`,
-      email: teacherEmail.trim() || `${teacherName.toLowerCase().replace(/\s+/g, "")}@giaovien.edu.vn`,
-      displayName: teacherName.trim() || "Thầy Cô Giáo",
-      role: "teacher",
-      gradeLevel: "high",
-      classGrade: "Cán bộ Giảng dạy Tin học",
-      school: "Tổ Chuyên Môn Tin học & STEM",
-      studentCode: `GV-${Date.now().toString().slice(-4)}`,
-      password: teacherPin.trim() || "STEM@2026",
-    };
+    setIsSubmitting(true);
+    setAuthError(null);
 
-    onSelectUser(newTeacher);
+    try {
+      // 1. Authenticate with Firebase Authentication
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const token = await userCredential.user.getIdToken();
+
+      // 2. Verify role with backend server
+      const verifyRes = await fetch("/api/auth/verify-role", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!verifyRes.ok) {
+        throw new Error("Không thể xác minh vai trò giáo viên từ máy chủ.");
+      }
+
+      const roleData = await verifyRes.json();
+      if (roleData.role !== "teacher") {
+        setAuthError("Tài khoản này không có quyền Giáo viên trong hệ thống. Vui lòng liên hệ Quản trị viên.");
+        return;
+      }
+
+      const verifiedTeacher: UserProfile = {
+        uid: userCredential.user.uid,
+        email: userCredential.user.email || email,
+        displayName: userCredential.user.displayName || teacherName.trim() || "Thầy Cô Giáo",
+        role: "teacher",
+        gradeLevel: "high",
+        classGrade: "Cán bộ Giảng dạy Tin học",
+        school: "Tổ Chuyên Môn Tin học & STEM",
+        studentCode: `GV-${userCredential.user.uid.slice(-4).toUpperCase()}`,
+      };
+
+      onSelectUser(verifiedTeacher);
+    } catch (err: any) {
+      console.warn("Teacher auth failed:", err);
+      if (err.code === "auth/user-not-found" || err.code === "auth/invalid-credential" || err.code === "auth/wrong-password") {
+        setAuthError("Email hoặc mật khẩu giáo viên không chính xác!");
+      } else {
+        setAuthError(err.message || "Xác thực giáo viên thất bại. Vui lòng kiểm tra lại tài khoản.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

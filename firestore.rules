@@ -6,25 +6,28 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Role check: Only custom claim token.role == 'teacher', verified teacher email, or entry in trusted_teachers
     function isTeacher() {
       return isSignedIn() && (
-        request.auth.token.email == 'nmnhat.n98@gmail.com' ||
         request.auth.token.role == 'teacher' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher')
+        request.auth.token.email in ['nmnhat.n98@gmail.com', 'admin@stem.edu.vn', 'giaovien@stem.edu.vn'] ||
+        exists(/databases/$(database)/documents/trusted_teachers/$(request.auth.uid))
       );
     }
 
     // Users collection (Profiles)
     match /users/{userId} {
-      // Authenticated users can read profiles (e.g. for collaboration or student list in class)
       allow read: if isSignedIn();
-      // User can create their own profile, or teacher can create/import
-      allow create: if isSignedIn() && (request.auth.uid == userId || isTeacher());
-      // Students cannot change their role to teacher
+      // Only teachers can create profiles with role == 'teacher'.
+      // Students can only create their own profile with role == 'student'.
+      allow create: if isSignedIn() && (
+        isTeacher() ||
+        (request.auth.uid == userId && request.resource.data.role == 'student')
+      );
+      // Students cannot elevate role to teacher
       allow update: if isSignedIn() && (
         isTeacher() ||
-        (request.auth.uid == userId && request.resource.data.role == resource.data.role)
+        (request.auth.uid == userId && request.resource.data.role == resource.data.role && resource.data.role != 'teacher')
       );
       allow delete: if isTeacher();
     }
@@ -49,16 +52,31 @@ service cloud.firestore {
         resource.data.studentId == request.auth.uid ||
         resource.data.studentEmail == request.auth.token.email
       );
-      // Students can create submissions for themselves; teacher can create
+
+      // Student submission creation: must belong to request.auth.uid, status 'submitted', score null, no teacherFeedback
       allow create: if isSignedIn() && (
-        request.resource.data.studentId == request.auth.uid ||
-        isTeacher()
+        isTeacher() ||
+        (
+          request.resource.data.studentId == request.auth.uid &&
+          request.resource.data.status == 'submitted' &&
+          (!('score' in request.resource.data) || request.resource.data.score == null) &&
+          (!('teacherFeedback' in request.resource.data) || request.resource.data.teacherFeedback == '')
+        )
       );
-      // Students can update their own un-graded submissions; teachers can grade
+
+      // Student update: only un-graded submissions, cannot change owner, cannot mark graded, cannot self-score
       allow update: if isSignedIn() && (
         isTeacher() ||
-        (resource.data.studentId == request.auth.uid && resource.data.status != 'graded')
+        (
+          resource.data.studentId == request.auth.uid &&
+          resource.data.status != 'graded' &&
+          request.resource.data.studentId == resource.data.studentId &&
+          request.resource.data.status == 'submitted' &&
+          (!('score' in request.resource.data) || request.resource.data.score == null) &&
+          (!('teacherFeedback' in request.resource.data) || request.resource.data.teacherFeedback == resource.data.teacherFeedback)
+        )
       );
+
       allow delete: if isTeacher();
     }
   }

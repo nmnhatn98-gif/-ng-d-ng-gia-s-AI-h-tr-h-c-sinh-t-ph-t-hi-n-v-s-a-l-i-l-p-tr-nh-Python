@@ -100,6 +100,31 @@ async function verifyAuthHeader(req: express.Request): Promise<VerifiedAuthUser 
   }
 }
 
+// Strict Auth Middleware Helpers
+async function requireAuth(req: express.Request, res: express.Response): Promise<VerifiedAuthUser | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Yêu cầu xác thực: Thiếu hoặc sai định dạng Authorization Bearer token." });
+    return null;
+  }
+  const user = await verifyAuthHeader(req);
+  if (!user) {
+    res.status(401).json({ error: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại." });
+    return null;
+  }
+  return user;
+}
+
+async function requireTeacher(req: express.Request, res: express.Response): Promise<VerifiedAuthUser | null> {
+  const user = await requireAuth(req, res);
+  if (!user) return null;
+  if (user.role !== "teacher") {
+    res.status(403).json({ error: "Quyền truy cập bị từ chối: Chỉ giáo viên được phân quyền mới có thể thực hiện thao tác này." });
+    return null;
+  }
+  return user;
+}
+
 // Helper: Sanitize student records to never expose passwords
 function sanitizeStudent(student: any) {
   if (!student) return student;
@@ -211,8 +236,11 @@ app.get("/api/auth/verify-role", async (req, res) => {
 });
 
 // --- 1. Students APIs ---
-app.get("/api/students", (req, res) => {
+app.get("/api/students", async (req, res) => {
   try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
     let students = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
     // If students.json is empty, attempt auto-recovery from vault
     if (!students || students.length === 0) {
@@ -224,15 +252,25 @@ app.get("/api/students", (req, res) => {
     }
     // Sanitize passwords - Never expose passwords in cleartext
     const safeStudents = (students || []).map(sanitizeStudent);
-    res.json({ success: true, students: safeStudents, total: safeStudents.length });
+
+    if (authUser.role === "teacher") {
+      return res.json({ success: true, students: safeStudents, total: safeStudents.length });
+    } else {
+      // Students can only see their own profile
+      const own = safeStudents.filter((s) => s.uid === authUser.uid || s.email === authUser.email);
+      return res.json({ success: true, students: own, total: own.length });
+    }
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi đọc danh sách học sinh: " + err.message });
   }
 });
 
 // Lookup student by username, studentCode, or displayName (checks both current and vault)
-app.get("/api/students/lookup", (req, res) => {
+app.get("/api/students/lookup", async (req, res) => {
   try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
     const query = String(req.query.q || "").trim().toLowerCase();
     if (!query) {
       return res.status(400).json({ error: "Thiếu thông tin tìm kiếm." });
@@ -257,7 +295,11 @@ app.get("/api/students/lookup", (req, res) => {
     });
 
     if (matched) {
-      // Ensure it is in students.json
+      // Students can only lookup themselves
+      if (authUser.role !== "teacher" && matched.uid !== authUser.uid && matched.email !== authUser.email) {
+        return res.status(403).json({ error: "Bạn chỉ có thể tra cứu thông tin của chính mình." });
+      }
+
       if (!current.some((s) => s.uid === matched.uid)) {
         current.unshift(matched);
         writeJsonData("students.json", current);
@@ -271,31 +313,32 @@ app.get("/api/students/lookup", (req, res) => {
   }
 });
 
-// Direct registration endpoint
-app.post("/api/students/register", (req, res) => {
+// Direct registration endpoint (requires auth to associate profile)
+app.post("/api/students/register", async (req, res) => {
   try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
     const student = req.body.student || req.body;
     if (!student || !student.displayName) {
       return res.status(400).json({ error: "Thiếu thông tin học sinh đăng ký." });
     }
 
     const current = readJsonData<any[]>("students.json", []);
-    const uid = student.uid || `std-reg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const uid = authUser.role === "teacher" ? (student.uid || `std-reg-${Date.now()}`) : authUser.uid;
     const studentCode = student.studentCode || `HS-${Date.now().toString().slice(-4)}`;
 
     const newRecord = {
       ...student,
       uid,
+      email: authUser.role === "teacher" ? student.email : authUser.email,
+      role: "student",
       studentCode,
       createdAt: student.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    // Check duplicate by code or uid
-    const existingIndex = current.findIndex(
-      (s) => s.uid === uid || (s.studentCode && String(s.studentCode).toLowerCase() === String(studentCode).toLowerCase())
-    );
-
+    const existingIndex = current.findIndex((s) => s.uid === uid);
     if (existingIndex >= 0) {
       current[existingIndex] = { ...current[existingIndex], ...newRecord };
     } else {
@@ -305,15 +348,18 @@ app.post("/api/students/register", (req, res) => {
     writeJsonData("students.json", current);
     saveToStudentVault([newRecord]);
 
-    res.json({ success: true, student: newRecord, count: current.length });
+    res.json({ success: true, student: sanitizeStudent(newRecord), count: current.length });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi đăng ký học sinh: " + err.message });
   }
 });
 
-// Restore from vault endpoint
-app.post("/api/students/restore-vault", (req, res) => {
+// Restore from vault endpoint (Teacher only)
+app.post("/api/students/restore-vault", async (req, res) => {
   try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
     const vault = readJsonData<any[]>("students_vault.json", []);
     const current = readJsonData<any[]>("students.json", []);
     const map = new Map<string, any>();
@@ -327,7 +373,7 @@ app.post("/api/students/restore-vault", (req, res) => {
       }
     });
 
-    const merged = Array.from(map.values());
+    const merged = Array.from(map.values()).map(sanitizeStudent);
     writeJsonData("students.json", merged);
     res.json({ success: true, count: merged.length, students: merged });
   } catch (err: any) {
@@ -335,8 +381,11 @@ app.post("/api/students/restore-vault", (req, res) => {
   }
 });
 
-app.post("/api/students", (req, res) => {
+app.post("/api/students", async (req, res) => {
   try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
     const incoming: any[] = Array.isArray(req.body.students)
       ? req.body.students
       : req.body.student
@@ -348,39 +397,40 @@ app.post("/api/students", (req, res) => {
     // Safeguard: Do NOT overwrite with empty unless explicitly forced with flag
     if (incoming.length === 0) {
       if (req.body.forceClearAll === true) {
-        // Backup before clearing
         saveToStudentVault(current);
         writeJsonData("students.json", []);
         return res.json({ success: true, count: 0, students: [] });
       }
-      return res.json({ success: true, count: current.length, students: current });
+      return res.json({ success: true, count: current.length, students: current.map(sanitizeStudent) });
     }
 
     if (req.body.replace === true || req.body.overwrite === true) {
-      saveToStudentVault(incoming);
-      writeJsonData("students.json", incoming);
-      return res.json({ success: true, count: incoming.length, students: incoming });
+      const sanitizedIncoming = incoming.map(sanitizeStudent);
+      saveToStudentVault(sanitizedIncoming);
+      writeJsonData("students.json", sanitizedIncoming);
+      return res.json({ success: true, count: sanitizedIncoming.length, students: sanitizedIncoming });
     }
 
     const currentMap = new Map<string, any>();
-    // Index by uid and studentCode
     current.forEach((s) => {
       if (s.uid) currentMap.set(s.uid, s);
       if (s.studentCode) currentMap.set(`code:${String(s.studentCode).toUpperCase()}`, s);
     });
 
     incoming.forEach((inStudent) => {
-      const codeKey = inStudent.studentCode ? `code:${String(inStudent.studentCode).toUpperCase()}` : null;
-      const existing = (inStudent.uid && currentMap.get(inStudent.uid)) || (codeKey && currentMap.get(codeKey));
+      const safe = sanitizeStudent(inStudent);
+      const codeKey = safe.studentCode ? `code:${String(safe.studentCode).toUpperCase()}` : null;
+      const existing = (safe.uid && currentMap.get(safe.uid)) || (codeKey && currentMap.get(codeKey));
 
       if (existing) {
-        Object.assign(existing, inStudent);
+        Object.assign(existing, safe);
         existing.updatedAt = new Date().toISOString();
       } else {
         const newRecord = {
-          ...inStudent,
-          uid: inStudent.uid || `std-srv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          createdAt: inStudent.createdAt || new Date().toISOString(),
+          ...safe,
+          role: "student",
+          uid: safe.uid || `std-srv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          createdAt: safe.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
         current.unshift(newRecord);
@@ -391,32 +441,54 @@ app.post("/api/students", (req, res) => {
       }
     });
 
-    writeJsonData("students.json", current);
-    saveToStudentVault(incoming);
-    res.json({ success: true, count: current.length, students: current });
+    const safeList = current.map(sanitizeStudent);
+    writeJsonData("students.json", safeList);
+    saveToStudentVault(incoming.map(sanitizeStudent));
+    res.json({ success: true, count: safeList.length, students: safeList });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi lưu học sinh: " + err.message });
   }
 });
 
-app.put("/api/students/:uid", (req, res) => {
+app.put("/api/students/:uid", async (req, res) => {
   try {
-    const current = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
     const { uid } = req.params;
+    if (authUser.role !== "teacher" && authUser.uid !== uid) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối: Bạn chỉ có thể cập nhật hồ sơ của chính mình." });
+    }
+
+    const current = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
     const index = current.findIndex((s) => s.uid === uid);
     if (index === -1) {
       return res.status(404).json({ error: "Không tìm thấy học sinh với ID này." });
     }
-    current[index] = { ...current[index], ...req.body, uid, updatedAt: new Date().toISOString() };
+
+    // Students cannot change their role to teacher
+    const roleToSet = authUser.role === "teacher" ? (req.body.role || current[index].role) : "student";
+    const sanitizedBody = sanitizeStudent(req.body);
+
+    current[index] = { 
+      ...current[index], 
+      ...sanitizedBody, 
+      uid, 
+      role: roleToSet,
+      updatedAt: new Date().toISOString() 
+    };
     writeJsonData("students.json", current);
-    res.json({ success: true, student: current[index] });
+    res.json({ success: true, student: sanitizeStudent(current[index]) });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi cập nhật học sinh: " + err.message });
   }
 });
 
-app.delete("/api/students/:uid", (req, res) => {
+app.delete("/api/students/:uid", async (req, res) => {
   try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
     const current = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
     const { uid } = req.params;
     const filtered = current.filter((s) => s.uid !== uid);
@@ -428,27 +500,73 @@ app.delete("/api/students/:uid", (req, res) => {
 });
 
 // --- 2. Submissions APIs ---
-app.get("/api/submissions", (req, res) => {
+app.get("/api/submissions", async (req, res) => {
   try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
     const submissions = readJsonData<any[]>("submissions.json", []);
-    res.json({ success: true, submissions, total: submissions.length });
+
+    if (authUser.role === "teacher") {
+      return res.json({ success: true, submissions, total: submissions.length });
+    } else {
+      // Students can only see their own submissions
+      const own = submissions.filter(
+        (s) => s.studentId === authUser.uid || s.studentEmail === authUser.email
+      );
+      return res.json({ success: true, submissions: own, total: own.length });
+    }
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi đọc bài nộp: " + err.message });
   }
 });
 
-app.post("/api/submissions", (req, res) => {
+app.post("/api/submissions", async (req, res) => {
   try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
     const current = readJsonData<any[]>("submissions.json", []);
     const submission = req.body;
     if (!submission || !submission.id) {
       return res.status(400).json({ error: "Dữ liệu bài nộp không hợp lệ." });
     }
+
+    if (authUser.role !== "teacher") {
+      // Force student identity to match authenticated token
+      submission.studentId = authUser.uid;
+      if (authUser.email) submission.studentEmail = authUser.email;
+      // Ungraded submissions must have score = null
+      submission.status = "submitted";
+      submission.score = null;
+      submission.teacherFeedback = "";
+      delete submission.evaluation;
+      delete submission.rubric;
+    }
+
     const index = current.findIndex((s) => s.id === submission.id);
     if (index >= 0) {
-      current[index] = { ...current[index], ...submission, updatedAt: new Date().toISOString() };
+      if (authUser.role !== "teacher") {
+        if (current[index].studentId !== authUser.uid && current[index].studentEmail !== authUser.email) {
+          return res.status(403).json({ error: "Bạn không có quyền sửa bài nộp của học sinh khác." });
+        }
+        if (current[index].status === "graded") {
+          return res.status(403).json({ error: "Bài làm đã được chấm điểm, không thể sửa đổi." });
+        }
+      }
+      current[index] = { 
+        ...current[index], 
+        ...submission, 
+        studentId: authUser.role === "teacher" ? submission.studentId : current[index].studentId,
+        score: authUser.role === "teacher" ? submission.score : null,
+        status: authUser.role === "teacher" ? submission.status : "submitted",
+        updatedAt: new Date().toISOString() 
+      };
     } else {
-      current.unshift({ ...submission, createdAt: submission.submittedAt || new Date().toISOString() });
+      current.unshift({ 
+        ...submission, 
+        createdAt: submission.submittedAt || new Date().toISOString() 
+      });
     }
     writeJsonData("submissions.json", current);
     res.json({ success: true, submission });
@@ -459,13 +577,8 @@ app.post("/api/submissions", (req, res) => {
 
 app.put("/api/submissions/:id/grade", async (req, res) => {
   try {
-    // If caller sends auth header, enforce verified teacher role
-    if (req.headers.authorization) {
-      const authUser = await verifyAuthHeader(req);
-      if (!authUser || authUser.role !== "teacher") {
-        return res.status(403).json({ error: "Quyền truy cập bị từ chối: Chỉ giáo viên được phân quyền mới có thể chấm điểm bài làm." });
-      }
-    }
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
 
     const current = readJsonData<any[]>("submissions.json", []);
     const { id } = req.params;
@@ -476,7 +589,7 @@ app.put("/api/submissions/:id/grade", async (req, res) => {
     }
     current[index] = {
       ...current[index],
-      score,
+      score: typeof score === "number" ? score : null,
       rubric,
       teacherFeedback,
       evaluation,
@@ -493,12 +606,8 @@ app.put("/api/submissions/:id/grade", async (req, res) => {
 // --- 3. System Backup & Restore APIs ---
 app.get("/api/system/backup", async (req, res) => {
   try {
-    if (req.headers.authorization) {
-      const authUser = await verifyAuthHeader(req);
-      if (!authUser || authUser.role !== "teacher") {
-        return res.status(403).json({ error: "Chỉ giáo viên được ủy quyền mới có quyền tạo bản sao lưu hệ thống." });
-      }
-    }
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
 
     const students = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
     const submissions = readJsonData<any[]>("submissions.json", []);
@@ -525,12 +634,8 @@ app.get("/api/system/backup", async (req, res) => {
 
 app.post("/api/system/restore", async (req, res) => {
   try {
-    if (req.headers.authorization) {
-      const authUser = await verifyAuthHeader(req);
-      if (!authUser || authUser.role !== "teacher") {
-        return res.status(403).json({ error: "Chỉ giáo viên được ủy quyền mới có quyền khôi phục dữ liệu hệ thống." });
-      }
-    }
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
 
     const { backupData } = req.body;
     if (!backupData || (!backupData.data && !backupData.students)) {
@@ -612,7 +717,7 @@ function checkAiRateLimit(key: string): { allowed: boolean; retryAfter?: number 
   return { allowed: true };
 }
 
-// Resilient Gemini execution helper with automatic fallback & timeout
+// Resilient Gemini execution helper with automatic retry for transient errors (429/503) only
 async function callGeminiGenerate(ai: GoogleGenAI, options: {
   contents: any;
   systemInstruction?: string;
@@ -620,48 +725,65 @@ async function callGeminiGenerate(ai: GoogleGenAI, options: {
   temperature?: number;
   timeoutMs?: number;
 }): Promise<string> {
-  // Configured model from environment variable, with verified fast fallbacks
-  const envModel = process.env.GEMINI_MODEL;
-  const candidateModels = [
-    envModel,
-    "gemini-3-flash-preview",
-    "gemini-3.5-flash",
-    "gemini-flash-latest"
-  ].filter((m): m is string => Boolean(m && typeof m === "string" && m.trim()));
-
-  // Deduplicate candidate models
-  const models = Array.from(new Set(candidateModels));
+  // Use model configured at server (process.env.GEMINI_MODEL); default to gemini-2.5-flash
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const timeoutMs = options.timeoutMs || 8000;
-  let lastError: any = null;
+  const maxRetries = 2; // Only retry transient errors up to 2 times
 
-  for (const model of models) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const config: any = {};
       if (options.temperature !== undefined) config.temperature = options.temperature;
       if (options.systemInstruction) config.systemInstruction = options.systemInstruction;
       if (options.responseMimeType) config.responseMimeType = options.responseMimeType;
 
+      let timer: NodeJS.Timeout | null = null;
       const apiCall = ai.models.generateContent({
         model,
         contents: options.contents,
         config: Object.keys(config).length > 0 ? config : undefined,
       });
 
-      const timer = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout calling model ${model} after ${timeoutMs}ms`)), timeoutMs)
-      );
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const timeoutErr: any = new Error(`Yêu cầu đến mô hình ${model} hết thời gian chờ sau ${timeoutMs}ms`);
+          timeoutErr.status = 504;
+          timeoutErr.code = "TIMEOUT";
+          reject(timeoutErr);
+        }, timeoutMs);
+      });
 
-      const res = await Promise.race([apiCall, timer]);
+      const res = await Promise.race([apiCall, timeoutPromise]);
+      if (timer) clearTimeout(timer);
+
       if (res && typeof res.text === "string" && res.text.trim()) {
         return res.text.trim();
       }
+      throw new Error("Phản hồi rỗng từ mô hình AI.");
     } catch (err: any) {
-      console.warn(`[Gemini SDK] Model ${model} failed/timed out:`, err?.message || err);
-      lastError = err;
+      const status = err?.status || err?.statusCode || (err?.message?.includes("429") ? 429 : err?.message?.includes("503") ? 503 : 500);
+      const isAuthOrClientError = status === 400 || status === 401 || status === 403 || status === 404;
+
+      // Do NOT retry authentication or client validation errors
+      if (isAuthOrClientError || attempt === maxRetries) {
+        throw err;
+      }
+
+      // Check if transient error (429 rate limit or 503 service unavailable or timeout)
+      const isTransient = status === 429 || status === 503 || status === 504 || err?.code === "TIMEOUT" || err?.message?.includes("RESOURCE_EXHAUSTED");
+      if (!isTransient) {
+        throw err;
+      }
+
+      // Exponential backoff: attempt 0 -> 1000ms, attempt 1 -> 2000ms, respecting Retry-After header
+      const retryAfterHeader = err?.response?.headers?.get?.("retry-after") || err?.retryAfter;
+      const retryWaitMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : 1000 * Math.pow(2, attempt);
+      console.warn(`[Gemini SDK] Transient error (${status}) on attempt ${attempt + 1}. Retrying in ${retryWaitMs}ms...`);
+      await new Promise((r) => setTimeout(r, retryWaitMs));
     }
   }
 
-  throw lastError || new Error("All Gemini models failed to generate content.");
+  throw new Error("Không thể kết nối đến mô hình Gemini sau các lần thử lại.");
 }
 
 // Pedagogical fallback analyzer for Programming & Python (when AI service is unreachable)

@@ -258,6 +258,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(null);
 
   // Student Reflection state (Phần học sinh trả lời để hoàn thiện chu trình sửa lỗi)
   const [reflection, setReflection] = useState<StudentReflection>({
@@ -427,7 +428,89 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
     URL.revokeObjectURL(url);
   };
 
-  // Save practice work (Bỏ việc tự gán 10/10 và graded; lưu ở trạng thái submitted)
+  // Client-side Pedagogical Hint Generator for Instant Offline Suggestions
+  const generatePedagogicalFallbackResponseClient = (params: {
+    codeContext?: string;
+    consoleOutput?: string;
+    hintLevel?: number;
+  }): string => {
+    const err = (params.consoleOutput || "").toLowerCase();
+    const level = Number(params.hintLevel) || 1;
+
+    if (err.includes("indentationerror") || err.includes("thụt lề") || err.includes("thụt đầu dòng")) {
+      if (level === 1) {
+        return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nTrình biên dịch đang báo lỗi thụt đầu dòng (IndentationError). Em hãy quan sát kỹ: Sau những dòng lệnh nào trong Python (như sau dấu hai chấm \`:\`), các câu lệnh tiếp theo bắt buộc phải thụt vào trong? Các dòng lệnh cùng cấp đã thụt lề bằng nhau chưa?`;
+      }
+      if (level === 2) {
+        return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nLỗi xảy ra ngay sau một cấu trúc có dấu hai chấm \`:\` (như \`if\`, \`for\`, \`while\` hoặc \`def\`).\n👉 **Nguyên nhân:** Dòng lệnh bên dưới chưa thụt vào, hoặc em đang gõ lẫn lộn phím Space (dấu cách) và phím Tab. Hãy rà soát lại các dòng thụt lề ở khối lệnh gần nhất.`;
+      }
+      return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nTrong Python, thụt lề (Indentation) dùng để xác định phạm vi khối lệnh thay vì dùng cặp ngoặc nhọn \`{}\`.\n\nVí dụ đúng chuẩn:\n\`\`\`python\nif diem >= 5:\n    print("Đạt")    # Thụt vào 4 dấu cách\nelse:\n    print("Chưa đạt")\n\`\`\`\nEm hãy áp dụng quy tắc này vào bài đang làm nhé!`;
+    }
+
+    if (err.includes("syntaxerror") || err.includes("cú pháp")) {
+      if (level === 1) {
+        return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nChương trình gặp lỗi cú pháp (SyntaxError). Em hãy kiểm tra xem mình có quên ký tự đặc biệt nào ở cuối câu lệnh rẽ nhánh/vòng lặp (như dấu hai chấm \`:\`), hoặc thiếu dấu đóng ngoặc \`()\` ở các lệnh \`print\`, \`input\` không?`;
+      }
+      if (level === 2) {
+        return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nLỗi cú pháp thường tập trung ở:\n1. **Dấu hai chấm \`:\`**: Em kiểm tra cuối dòng \`def\`, \`if\`, \`elif\`, \`else\`, \`for\`, \`while\` đã có dấu hai chấm chưa?\n2. **Đóng ngoặc đơn \`()\`**: Đếm số lượng ngoặc mở và đóng trong câu lệnh có khớp nhau không?`;
+      }
+      return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nPython yêu cầu mọi câu lệnh định nghĩa khối phải kết thúc bằng dấu hai chấm \`:\`.\n\nVí dụ minh họa:\n\`\`\`python\nfor i in range(1, 10):  # Bắt buộc có dấu hai chấm ở cuối\n    print(i)\n\`\`\`\nHãy so sánh với cú pháp dòng lệnh của em để tự sửa lại nhé.`;
+    }
+
+    if (err.includes("nameerror")) {
+      if (level === 1) {
+        return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nThông báo \`NameError\` nghĩa là Python không nhận diện được tên biến hoặc tên hàm. Em thử kiểm tra xem tên đó đã được tạo ra trước khi sử dụng chưa, và có viết sai chính tả chữ hoa/thường không?`;
+      }
+      return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nLỗi NameError xuất hiện khi biến chưa được gán giá trị ở các dòng phía trên, hoặc tên biến bị gõ sai (Python phân biệt chữ hoa/thường, ví dụ \`tong\` khác \`Tong\`). Hãy kiểm tra lại tên biến trong lệnh đang tính toán.`;
+    }
+
+    if (level === 1) {
+      return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nEm hãy quan sát kết quả chạy ở màn hình và mục đích của bài toán:\n1. Đầu vào cần nhập dữ liệu dạng gì?\n2. Kết quả máy tính đang in ra có đúng với ví dụ mẫu không, hay xuất hiện dòng báo lỗi nào?`;
+    } else if (level === 2) {
+      return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nEm hãy kiểm tra thứ tự thực hiện các bước trong chương trình:\n- Bước 1: Nhập dữ liệu và ép kiểu.\n- Bước 2: Vòng lặp hoặc điều kiện tính toán.\n- Bước 3: In kết quả ra màn hình với \`print()\`. Dòng nào đang thực hiện chưa đúng ý định của em?`;
+    }
+    return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nVí dụ cấu trúc chuẩn nhập và tính toán lặp:\n\`\`\`python\ntong = 0\nfor x in [1, 2, 3, 4]:\n    tong += x\nprint("Tổng là:", tong)\n\`\`\`\nEm hãy vận dụng cấu trúc tương tự để hoàn thiện bài của mình nhé!`;
+  };
+
+  // Instant Fallback Hint (Không gọi Gemini thêm lần nào, trả kết quả tức thì)
+  const handleInstantFallbackHint = (targetLevel?: 1 | 2 | 3) => {
+    const lvl = targetLevel !== undefined ? targetLevel : hintLevel;
+    const fallbackText = generatePedagogicalFallbackResponseClient({
+      codeContext: code,
+      consoleOutput,
+      hintLevel: lvl,
+    });
+
+    const assistantMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: "assistant",
+      content: `⚠️ **[Gợi ý có sẵn — không phải phản hồi AI]**\n\n${fallbackText}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setAiMessages((prev) => [...prev, assistantMsg]);
+    setAiErrorState(null);
+
+    const hintItem: AiHintItem = {
+      id: `hint-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      level: lvl,
+      prompt: aiErrorState?.lastPrompt || `Xem gợi ý có sẵn Mức ${lvl}`,
+      response: fallbackText,
+      source: "fallback",
+    };
+
+    setDebugSession((prev) => ({
+      ...prev,
+      hints: [hintItem, ...prev.hints],
+    }));
+
+    setTimeout(() => {
+      aiBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  };
+
+  // Save practice work (Bỏ việc tự gán 10/10 và graded; lưu ở trạng thái submitted với score: null; không tạo bài trùng khi thử lại)
   const handleSavePractice = async () => {
     if (!onSubmitWork) return;
     setIsSaving(true);
@@ -441,8 +524,10 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
       saveStatus: "saving",
     };
 
+    const subIdToUse = activeSubmissionId || `sub-py-${Date.now()}`;
     try {
       await onSubmitWork({
+        id: subIdToUse,
         lessonId: `python-session-${selectedTemplateKey}`,
         lessonTitle: `Thực hành Python: ${PYTHON_TEMPLATES[selectedTemplateKey]?.name || "Mã tự do"}`,
         studentId: currentUser.uid,
@@ -457,12 +542,13 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           templateKey: selectedTemplateKey,
           debugSession: sessionToSave,
         },
-        // Bắt đầu bằng trạng thái submitted, chưa có điểm số (chờ giáo viên duyệt và chấm điểm)
-        score: 0,
+        // Bắt đầu bằng trạng thái submitted, điểm số null (chờ giáo viên duyệt và chấm điểm)
+        score: null,
         maxScore: 10,
         status: "submitted",
       });
 
+      setActiveSubmissionId(subIdToUse);
       setSaveSuccess(true);
       setDebugSession({ ...sessionToSave, saveStatus: "saved" });
       setTimeout(() => setSaveSuccess(false), 4000);
@@ -1259,7 +1345,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleSendAi(aiErrorState.lastPrompt, hintLevel, true)}
+                      onClick={() => handleInstantFallbackHint(hintLevel)}
                       className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded font-bold text-[11px] border border-amber-600/50"
                     >
                       💡 Xem gợi ý có sẵn

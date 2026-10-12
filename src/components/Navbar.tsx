@@ -17,7 +17,9 @@ import {
   Sparkles,
   GraduationCap,
   Cpu,
-  LayoutDashboard
+  LayoutDashboard,
+  Menu,
+  X
 } from "lucide-react";
 
 interface NavbarProps {
@@ -48,6 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isPracticeMenuOpen, setIsPracticeMenuOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [readSubmissions, setReadSubmissions] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(`lms_read_notifications_${currentUser.uid}`);
@@ -95,33 +98,47 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo & Tên ứng dụng */}
-          <div
-            className="flex items-center gap-2.5 cursor-pointer select-none"
-            onClick={() => setActiveTab(currentUser.role === "teacher" ? "teacher-admin" : "lessons")}
-          >
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs">
-              <Code2 className="w-5 h-5" />
+          {/* Left: Mobile Hamburger & Logo */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Mobile Drawer Hamburger Button (< 768px) */}
+            <button
+              type="button"
+              onClick={() => setIsMobileDrawerOpen(true)}
+              className="md:hidden min-w-[44px] min-h-[44px] flex items-center justify-center p-2 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              aria-label="Mở menu điều hướng"
+              title="Menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            {/* Logo & Tên ứng dụng */}
+            <div
+              className="flex items-center gap-2.5 cursor-pointer select-none"
+              onClick={() => setActiveTab(currentUser.role === "teacher" ? "teacher-admin" : "lessons")}
+            >
+              <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs shrink-0">
+                <Code2 className="w-5 h-5" />
+              </div>
+              <span className="font-bold text-base text-slate-900 tracking-tight">
+                STEM Tin học
+              </span>
             </div>
-            <span className="font-bold text-base text-slate-900 tracking-tight">
-              STEM Tin học
-            </span>
           </div>
 
-          {/* Main Navigation Tabs */}
+          {/* Desktop/Tablet Navigation Tabs (hidden on mobile < 768px) */}
           {currentUser.role === "student" ? (
-            <nav className="flex items-center space-x-1 sm:space-x-2">
+            <nav className="hidden md:flex items-center space-x-1 lg:space-x-2">
               {/* 1. Việc học của em */}
               <button
                 type="button"
                 onClick={() => setActiveTab("lessons")}
-                className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                className={`min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "lessons"
                     ? "bg-blue-50 text-blue-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                 }`}
               >
-                <BookOpen className="w-4 h-4" />
+                <BookOpen className="w-4 h-4 text-blue-600" />
                 <span>Việc học của em</span>
               </button>
 
@@ -130,13 +147,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsPracticeMenuOpen((prev) => !prev)}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  className={`min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
                     activeTab === "python-lab" || activeTab === "html-lab"
                       ? "bg-blue-50 text-blue-700 font-semibold"
                       : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                   }`}
                 >
-                  <Code2 className="w-4 h-4 text-blue-600" />
+                  <Code2 className="w-4 h-4 text-emerald-600" />
                   <span>Phòng thực hành</span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </button>
@@ -154,7 +171,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           setIsPracticeMenuOpen(false);
                           setActiveTab("python-lab");
                         }}
-                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer ${
+                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer min-h-[44px] ${
                           activeTab === "python-lab" ? "text-blue-600 font-semibold bg-blue-50/50" : "text-slate-700"
                         }`}
                       >
@@ -173,7 +190,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           setIsPracticeMenuOpen(false);
                           setActiveTab("html-lab");
                         }}
-                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer ${
+                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer min-h-[44px] ${
                           activeTab === "html-lab" ? "text-blue-600 font-semibold bg-blue-50/50" : "text-slate-700"
                         }`}
                       >
@@ -194,7 +211,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab("results")}
-                className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                className={`min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "results" || activeTab === "leaderboard"
                     ? "bg-blue-50 text-blue-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -206,11 +223,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             </nav>
           ) : (
             /* Teacher view preserved */
-            <nav className="flex items-center space-x-1 sm:space-x-2">
+            <nav className="hidden md:flex items-center space-x-1 lg:space-x-2">
               <button
                 type="button"
                 onClick={() => setActiveTab("lessons")}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "lessons"
                     ? "bg-blue-50 text-blue-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -223,7 +240,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab("python-lab")}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "python-lab"
                     ? "bg-emerald-50 text-emerald-800 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -236,7 +253,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab("html-lab")}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "html-lab"
                     ? "bg-orange-50 text-orange-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -249,7 +266,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab("teacher-admin")}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "teacher-admin"
                     ? "bg-emerald-50 text-emerald-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
@@ -464,6 +481,203 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
       </div>
+
+      {/* Mobile Drawer (phone screens < 768px) */}
+      {isMobileDrawerOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsMobileDrawerOpen(false)}
+          />
+          <div className="relative w-72 max-w-[85vw] bg-white text-slate-900 flex flex-col h-full z-10 shadow-2xl p-4 overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-xs">
+                  <Code2 className="w-4 h-4" />
+                </div>
+                <span className="font-bold text-sm text-slate-900">STEM Tin học</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+                aria-label="Đóng menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <nav className="py-4 space-y-1.5 flex-1">
+              {currentUser.role === "student" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("lessons");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer ${
+                      activeTab === "lessons"
+                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <BookOpen className="w-5 h-5 text-blue-600" />
+                    <span>Việc học của em</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("python-lab");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer text-left ${
+                      activeTab === "python-lab"
+                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Code2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                    <div>
+                      <div className="font-medium text-slate-900">Phòng thực hành Python</div>
+                      <div className="text-[11px] text-slate-500">Chạy thử và gỡ lỗi code</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("html-lab");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer text-left ${
+                      activeTab === "html-lab"
+                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <FileCode className="w-5 h-5 text-amber-600 shrink-0" />
+                    <div>
+                      <div className="font-medium text-slate-900">Phòng thực hành HTML/CSS</div>
+                      <div className="text-[11px] text-slate-500">Thiết kế web và xem trước</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("results");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer ${
+                      activeTab === "results" || activeTab === "leaderboard"
+                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Award className="w-5 h-5 text-amber-500" />
+                    <span>Kết quả học tập</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("teacher-admin");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer ${
+                      activeTab === "teacher-admin"
+                        ? "bg-emerald-50 text-emerald-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <LayoutDashboard className="w-5 h-5 text-emerald-600" />
+                    <span>Quản trị & Chấm điểm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("lessons");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors cursor-pointer ${
+                      activeTab === "lessons"
+                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <BookOpen className="w-5 h-5 text-blue-600" />
+                    <span>Xem học sinh</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("python-lab");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 text-slate-700 hover:bg-slate-100 cursor-pointer"
+                  >
+                    <Code2 className="w-5 h-5 text-emerald-600" />
+                    <span>Python Lab</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("html-lab");
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 text-slate-700 hover:bg-slate-100 cursor-pointer"
+                  >
+                    <FileCode className="w-5 h-5 text-amber-600" />
+                    <span>HTML Lab</span>
+                  </button>
+                </>
+              )}
+            </nav>
+
+            {/* Bottom Account & Actions in Drawer */}
+            <div className="pt-4 border-t border-slate-100 space-y-2">
+              <div className="flex items-center gap-2.5 px-2">
+                <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase shrink-0">
+                  {currentUser.displayName.charAt(0)}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-slate-800 truncate">{currentUser.displayName}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{currentUser.classGrade || currentUser.role}</div>
+                </div>
+              </div>
+              {currentUser.uid !== "guest-explorer" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileDrawerOpen(false);
+                    onLogout?.();
+                  }}
+                  className="w-full min-h-[44px] flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4 text-rose-500" />
+                  <span>Đăng xuất</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileDrawerOpen(false);
+                    onOpenLogin?.("student");
+                  }}
+                  className="w-full min-h-[44px] flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Đăng nhập</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };

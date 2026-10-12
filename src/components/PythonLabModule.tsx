@@ -247,6 +247,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   const [execTime, setExecTime] = useState<number | null>(null);
   const [isError, setIsError] = useState<boolean>(false);
   const [activeBottomTab, setActiveBottomTab] = useState<"output" | "stdin" | "diary" | "cheatsheet">("output");
+  const [mobileLabTab, setMobileLabTab] = useState<"code" | "output" | "ai" | "diary">("code");
   const [showCompatModal, setShowCompatModal] = useState<boolean>(false);
 
   // Editor settings
@@ -671,7 +672,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-65px)] bg-slate-950 text-slate-100 font-sans select-none">
+    <div className="flex flex-col h-full min-h-0 flex-1 bg-slate-950 text-slate-100 font-sans select-none overflow-hidden">
       {/* Top Navbar */}
       <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 z-10">
         {/* Left side: Back + Title & Template Selector */}
@@ -679,7 +680,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           {onBack && (
             <button
               onClick={onBack}
-              className="p-1.5 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 rounded-xl transition-all border border-slate-700/60"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 rounded-xl transition-all border border-slate-700/60 cursor-pointer"
               title="Quay lại danh sách khóa học"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -687,13 +688,13 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           )}
 
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/20">
+            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black shadow-xs">
               <Code2 className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-black text-sm text-white tracking-tight">Khu Lập Trình Python 3</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-950/80 text-emerald-400 border border-emerald-700/50">
+                <span className="font-bold text-sm text-white tracking-tight">Khu Lập Trình Python 3</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/50">
                   Sandbox Tự Do
                 </span>
               </div>
@@ -725,7 +726,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           {/* Theme toggle */}
           <button
             onClick={() => setTheme(theme === "vs-dark" ? "light" : "vs-dark")}
-            className="hidden sm:inline-flex items-center px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-300 border border-slate-700 transition-colors"
+            className="hidden sm:inline-flex items-center min-h-[36px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-300 border border-slate-700 transition-colors"
             title="Đổi giao diện Sáng / Tối"
           >
             {theme === "vs-dark" ? "🌙 Tối" : "☀️ Sáng"}
@@ -734,7 +735,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           {/* Copy Code */}
           <button
             onClick={handleCopyCode}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
             title="Sao chép toàn bộ mã nguồn"
           >
             {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
@@ -743,7 +744,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           {/* Download File */}
           <button
             onClick={handleDownloadCode}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
             title="Tải file .py về máy tính"
           >
             <Download className="w-4 h-4" />
@@ -752,7 +753,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           {/* Reset Code */}
           <button
             onClick={() => handleSelectTemplate(selectedTemplateKey)}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
             title="Khôi phục lại mã ban đầu của mẫu này"
           >
             <RotateCcw className="w-4 h-4" />
@@ -763,7 +764,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
             <button
               onClick={handleSavePractice}
               disabled={isSaving}
-              className={`hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+              className={`hidden lg:inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
                 saveSuccess
                   ? "bg-emerald-900/60 text-emerald-300 border-emerald-700"
                   : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
@@ -784,11 +785,11 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
             </button>
           )}
 
-          {/* RUN CODE BUTTON */}
+          {/* RUN CODE BUTTON (Desktop / Tablet) */}
           <button
             onClick={handleRunCode}
             disabled={isRunning}
-            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
+            className="hidden md:flex min-h-[36px] px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
             title="Chạy thử code Python (Ctrl + Enter)"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
@@ -798,7 +799,7 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           {/* Toggle AI Sidebar */}
           <button
             onClick={() => setIsAiOpen(!isAiOpen)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+            className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
               isAiOpen
                 ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
                 : "bg-slate-800 text-indigo-300 border-indigo-800 hover:bg-slate-700"
@@ -809,6 +810,51 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
           </button>
         </div>
       </header>
+
+      {/* Mobile Tab Navigation Bar (< 768px) */}
+      <div className="md:hidden flex items-center bg-slate-900 border-b border-slate-800 shrink-0 px-2 py-1 gap-1">
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("code")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "code" ? "bg-blue-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Code2 className="w-4 h-4" />
+          <span>Mã</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("output")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "output" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Terminal className="w-4 h-4" />
+          <span>Kết quả</span>
+          {consoleOutput.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("ai")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "ai" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Bot className="w-4 h-4" />
+          <span>Gia sư</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("diary")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "diary" ? "bg-amber-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span>Nhật ký</span>
+        </button>
+      </div>
 
       {/* Main Workspace (Split into Editor/Bottom Panel on left, and AI Sidebar on right) */}
       <div className="flex-1 flex overflow-hidden">

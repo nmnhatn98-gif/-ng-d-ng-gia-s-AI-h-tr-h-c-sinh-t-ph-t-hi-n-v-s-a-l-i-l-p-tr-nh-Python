@@ -265,24 +265,24 @@ export const StudentAccountManager: React.FC<StudentAccountManagerProps> = ({
       return;
     }
 
-    const newProfiles: UserProfile[] = parsed.map((item, idx) => {
+    const newProfiles: UserProfile[] = parsed.map((item: any, idx) => {
       const classGrade = item.classGrade || sheetsTargetClass;
       const cleanClass = classGrade.replace(/\s+/g, "").toUpperCase();
-      const code = item.code || `HS-${cleanClass}-${String(idx + 1).padStart(2, "0")}`;
+      const code = item.studentCode || item.code || `HS-${cleanClass}-${String(idx + 1).padStart(2, "0")}`;
       const email = item.email || `${code.toLowerCase()}@${cleanClass.toLowerCase()}.lms.vn`;
 
       return {
-        uid: `std-sheet-${Date.now()}-${idx}`,
-        displayName: item.name,
+        uid: item.uid || `std-sheet-${Date.now()}-${idx}`,
+        displayName: item.displayName || item.name || "Học sinh",
         role: "student",
         studentCode: code,
         classGrade: classGrade,
-        gradeLevel: "middle",
+        gradeLevel: item.gradeLevel || "middle",
         email: email,
         password: item.password || "123456",
-        school: "Trường Phổ Thông",
+        school: item.school || "Trường Phổ Thông",
         isGoogleLinked: false,
-        createdAt: new Date().toISOString(),
+        createdAt: item.createdAt || new Date().toISOString(),
       };
     });
 

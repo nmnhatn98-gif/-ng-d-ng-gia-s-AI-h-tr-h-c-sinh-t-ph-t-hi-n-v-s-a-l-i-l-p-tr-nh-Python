@@ -204,7 +204,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         <button
           type="button"
           onClick={() => setActiveFilter("need_work")}
-          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all min-h-[40px] flex items-center gap-2 border cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all min-h-[44px] flex items-center gap-2 border cursor-pointer ${
             activeFilter === "need_work"
               ? "bg-blue-600 text-white border-blue-600 shadow-xs"
               : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -227,7 +227,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         <button
           type="button"
           onClick={() => setActiveFilter("submitted")}
-          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all min-h-[40px] flex items-center gap-2 border cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all min-h-[44px] flex items-center gap-2 border cursor-pointer ${
             activeFilter === "submitted"
               ? "bg-blue-600 text-white border-blue-600 shadow-xs"
               : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -250,7 +250,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         <button
           type="button"
           onClick={() => setActiveFilter("graded")}
-          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all min-h-[40px] flex items-center gap-2 border cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all min-h-[44px] flex items-center gap-2 border cursor-pointer ${
             activeFilter === "graded"
               ? "bg-blue-600 text-white border-blue-600 shadow-xs"
               : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -326,7 +326,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       if (onOpenPythonLab) onOpenPythonLab();
                       else if (onOpenHtmlLab) onOpenHtmlLab();
                     }}
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors min-h-[40px] cursor-pointer flex items-center gap-2 shadow-xs"
+                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors min-h-[44px] cursor-pointer flex items-center gap-2 shadow-xs"
                   >
                     <Code2 className="w-3.5 h-3.5" />
                     <span>Mở phòng thực hành</span>
@@ -425,12 +425,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       )}
                     </div>
 
-                    {/* Nút hành động duy nhất, chiều cao >= 40px */}
+                    {/* Nút hành động duy nhất, chiều cao >= 44px */}
                     <div className="sm:self-center shrink-0">
                       <button
                         type="button"
                         onClick={() => onSelectLesson(lesson)}
-                        className={`w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-semibold transition-all min-h-[40px] flex items-center justify-center gap-2 cursor-pointer ${actionClass}`}
+                        className={`w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-semibold transition-all min-h-[44px] flex items-center justify-center gap-2 cursor-pointer ${actionClass}`}
                       >
                         <span>{actionLabel}</span>
                         <ArrowRight className="w-4 h-4 opacity-70" />

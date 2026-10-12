@@ -218,8 +218,8 @@ export interface CurriculumTopic {
   title: string;
   gdptCode: string;    // VD: "Chủ đề F: Thuật toán & Lập trình (GDPT 2018)"
   description: string;
-  outcomes: string[];  // Yêu cầu cần đạt
-  keywords: string[];
+  outcomes?: string[];  // Yêu cầu cần đạt
+  keywords?: string[];
   recommendedLab?: "python" | "html" | "scratch" | "general";
   labActionText?: string;
 }

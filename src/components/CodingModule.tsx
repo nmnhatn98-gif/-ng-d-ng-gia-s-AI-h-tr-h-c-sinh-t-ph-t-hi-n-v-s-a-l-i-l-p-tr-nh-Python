@@ -88,6 +88,9 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submittedSuccess, setSubmittedSuccess] = useState<boolean>(false);
 
+  // Mobile layout state (< 768px)
+  const [mobileTab, setMobileTab] = useState<"code" | "testcases" | "ai" | "console">("code");
+
   const testcases: TestCase[] = lesson.testcases || [
     { id: 1, input: "10", expectedOutput: "30" },
     { id: 2, input: "5", expectedOutput: "6" },
@@ -261,20 +264,20 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
   };
 
   return (
-    <div className="h-[calc(100vh-65px)] flex flex-col bg-slate-900 text-slate-100 overflow-hidden">
+    <div className="h-full min-h-0 flex-1 flex flex-col bg-slate-900 text-slate-100 overflow-hidden font-sans">
       {/* Top Action Bar */}
-      <div className="bg-slate-950 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="bg-slate-950 border-b border-slate-800 px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             onClick={onBack}
-            className="px-2.5 py-1 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1"
+            className="min-h-[36px] px-2.5 py-1 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
           >
             ← Thoát
           </button>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-white tracking-tight">{lesson.title}</span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-900/60 text-indigo-300 border border-indigo-700/50">
+              <span className="font-bold text-xs sm:text-sm text-white tracking-tight truncate">{lesson.title}</span>
+              <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-900/60 text-indigo-300 border border-indigo-700/50 shrink-0">
                 {lesson.level === "high" ? "Cấp THPT" : "Cấp THCS"}
               </span>
             </div>
@@ -282,7 +285,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
         </div>
 
         {/* Controls: Language, Theme, Run, Submit */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
           {/* Language Selector */}
           <div className="flex items-center bg-slate-800/80 p-0.5 rounded-lg border border-slate-700 text-xs">
             <button
@@ -292,9 +295,9 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                   setCode("# Viết mã Python tại đây\n");
                 }
               }}
-              className={`px-2.5 py-1 rounded-md font-semibold transition-all flex items-center gap-1 ${
+              className={`min-h-[30px] px-2.5 py-1 rounded-md font-semibold transition-all flex items-center gap-1 cursor-pointer ${
                 language === "python"
-                  ? "bg-amber-500 text-slate-950 shadow-xs"
+                  ? "bg-amber-500 text-slate-950 shadow-xs font-bold"
                   : "text-slate-400 hover:text-white"
               }`}
             >
@@ -307,13 +310,13 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                   setCode("#include <iostream>\nusing namespace std;\n\nint main() {\n    // Code C++ tại đây\n    return 0;\n}\n");
                 }
               }}
-              className={`px-2.5 py-1 rounded-md font-semibold transition-all flex items-center gap-1 ${
+              className={`min-h-[30px] px-2.5 py-1 rounded-md font-semibold transition-all flex items-center gap-1 cursor-pointer ${
                 language === "cpp"
-                  ? "bg-sky-500 text-slate-950 shadow-xs"
+                  ? "bg-sky-500 text-slate-950 shadow-xs font-bold"
                   : "text-slate-400 hover:text-white"
               }`}
             >
-              <span>C++ (GCC)</span>
+              <span>C++</span>
             </button>
           </div>
 
@@ -321,39 +324,38 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
           <button
             onClick={() => setCode(lesson.starterCode || "")}
             title="Khôi phục mã nguồn ban đầu"
-            className="p-1.5 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+            className="hidden sm:flex min-h-[36px] min-w-[36px] items-center justify-center p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
 
-          {/* RUN CODE BUTTON (CHẠY THỬ CODE) */}
+          {/* RUN CODE BUTTON (Desktop / Tablet) */}
           <button
             onClick={() => handleRunCode()}
             disabled={isRunning}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
+            className="hidden sm:inline-flex min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50 cursor-pointer"
             title="Chạy thử code ngay lập tức (Phím tắt: Ctrl + Enter)"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isRunning ? "Đang chạy..." : "Chạy thử (Run)"}</span>
+            <span>{isRunning ? "Đang chạy..." : "Chạy thử"}</span>
           </button>
 
-          {/* RUN ALL TESTCASES BUTTON (CHẤM TEST CASE) */}
+          {/* RUN ALL TESTCASES BUTTON (Desktop / Tablet) */}
           <button
             onClick={handleRunAllTestcases}
             disabled={isRunning}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-700/60 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-50"
+            className="hidden md:inline-flex min-h-[36px] px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-700/60 rounded-lg text-xs font-bold transition-all items-center gap-1.5 disabled:opacity-50 cursor-pointer"
             title="Chạy kiểm tra tự động tất cả các bộ test case"
           >
             <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">{isRunning ? "Đang chấm..." : "Chấm Test Case"}</span>
-            <span className="sm:hidden">Chấm Test</span>
+            <span>{isRunning ? "Đang chấm..." : "Chấm Test"}</span>
           </button>
 
           {/* Submit Solution Button */}
           <button
             onClick={handleSubmitSolution}
             disabled={isSubmitting || submittedSuccess}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`min-h-[36px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               submittedSuccess
                 ? "bg-blue-600/50 text-blue-200 border border-blue-500/50"
                 : "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20"
@@ -362,7 +364,8 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
             {submittedSuccess ? (
               <>
                 <Check className="w-3.5 h-3.5" />
-                <span>Đã nộp bài ({passedCount}/{testcases.length})</span>
+                <span className="hidden sm:inline">Đã nộp ({passedCount}/{testcases.length})</span>
+                <span className="sm:hidden">Đã nộp</span>
               </>
             ) : (
               <>
@@ -375,24 +378,85 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
           {/* Toggle AI Sidebar */}
           <button
             onClick={() => setIsAiOpen(!isAiOpen)}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+            className={`min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border cursor-pointer ${
               isAiOpen
                 ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
                 : "bg-slate-800 text-indigo-300 border-indigo-800 hover:bg-slate-700"
             }`}
           >
             <Bot className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Trợ lý AI</span>
+            <span className="hidden sm:inline">Gia sư AI</span>
           </button>
         </div>
       </div>
 
+      {/* ================= MOBILE TAB NAVIGATION BAR (< 768px) ================= */}
+      <div className="md:hidden flex items-center bg-slate-950 border-b border-slate-800 shrink-0 px-2 py-1 gap-1">
+        <button
+          type="button"
+          onClick={() => setMobileTab("code")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileTab === "code"
+              ? "bg-amber-500 text-slate-950 shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <FileCode className="w-4 h-4" />
+          <span>Mã</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("testcases")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileTab === "testcases"
+              ? "bg-sky-600 text-white shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <CheckCircle2 className="w-4 h-4" />
+          <span>Bộ Test ({testcases.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("ai")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileTab === "ai"
+              ? "bg-indigo-600 text-white shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Bot className="w-4 h-4" />
+          <span>Gia sư AI</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("console")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileTab === "console"
+              ? "bg-emerald-600 text-white shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Terminal className="w-4 h-4" />
+          <span>Console</span>
+        </button>
+      </div>
+
       {/* Main Workspace: Left Editor & Testcases, Right AI Panel */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Left Column: Code Editor + Test Case Bottom Bar */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-slate-800">
+        <div
+          className={`flex-1 flex flex-col min-w-0 border-r border-slate-800 ${
+            // On mobile: show only if mobileTab is code, testcases, or console
+            mobileTab === "ai" ? "hidden md:flex" : "flex"
+          }`}
+        >
           {/* Editor Header / Sub-bar */}
-          <div className="bg-slate-900 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs shrink-0">
+          <div
+            className={`bg-slate-900 border-b border-slate-800 px-3 py-1.5 flex items-center justify-between text-xs shrink-0 ${
+              mobileTab !== "code" ? "hidden md:flex" : "flex"
+            }`}
+          >
             <div className="flex items-center gap-2">
               <span className="font-mono font-semibold text-slate-200 flex items-center gap-1.5">
                 <FileCode className="w-3.5 h-3.5 text-amber-400" />
@@ -410,17 +474,21 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
               <button
                 onClick={() => handleRunCode()}
                 disabled={isRunning}
-                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 shadow-xs shadow-emerald-600/30 disabled:opacity-50"
-                title="Chạy thử code ngay lập tức (Phím tắt: Ctrl + Enter)"
+                className="hidden sm:flex px-3 py-1 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg text-xs transition-all items-center gap-1.5 shadow-xs shadow-emerald-600/30 disabled:opacity-50 cursor-pointer"
+                title="Chạy thử code ngay lập tức (Ctrl + Enter)"
               >
                 <Play className="w-3 h-3 fill-current" />
-                <span>Chạy thử code (Run)</span>
+                <span>Chạy thử (Run)</span>
               </button>
             </div>
           </div>
 
           {/* Monaco Editor Container */}
-          <div className="flex-1 relative">
+          <div
+            className={`flex-1 min-h-0 relative ${
+              mobileTab !== "code" ? "hidden md:block" : "block"
+            }`}
+          >
             <Editor
               height="100%"
               language={language === "cpp" ? "cpp" : "python"}
@@ -441,14 +509,48 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
             />
           </div>
 
-          {/* Bottom Panel: Testcases / Custom Input / Console */}
-          <div className="h-64 bg-slate-950 border-t border-slate-800 flex flex-col shrink-0">
+          {/* Mobile Bottom Quick Actions (When in Code tab on phone) */}
+          {mobileTab === "code" && (
+            <div className="md:hidden flex items-center justify-between p-2.5 bg-slate-950 border-t border-slate-800 shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleRunCode();
+                  setMobileTab("console");
+                }}
+                className="flex-1 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/30 cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>Chạy & Xem kết quả</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleRunAllTestcases();
+                  setMobileTab("testcases");
+                }}
+                className="flex-1 min-h-[44px] bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-sky-600/30 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Chấm Test</span>
+              </button>
+            </div>
+          )}
+
+          {/* Bottom Panel: Testcases / Custom Input / Console (Desktop/Tablet: h-64, Mobile: takes full panel if testcases or console active) */}
+          <div
+            className={`bg-slate-950 border-t border-slate-800 flex flex-col shrink-0 ${
+              mobileTab === "code"
+                ? "hidden md:flex md:h-64"
+                : "flex-1 md:h-64"
+            }`}
+          >
             {/* Tab Headers */}
             <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800 text-xs">
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setActiveBottomTab("testcases")}
-                  className={`px-3 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
+                  className={`min-h-[34px] px-3 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
                     activeBottomTab === "testcases"
                       ? "bg-slate-800 text-sky-400 border border-slate-700"
                       : "text-slate-400 hover:text-slate-200"
@@ -467,19 +569,20 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
 
                 <button
                   onClick={() => setActiveBottomTab("custom_input")}
-                  className={`px-3 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
+                  className={`min-h-[34px] px-3 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
                     activeBottomTab === "custom_input"
                       ? "bg-slate-800 text-amber-400 border border-slate-700"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   <Terminal className="w-3.5 h-3.5" />
-                  <span>Nhập dữ liệu tay (Custom Stdin)</span>
+                  <span className="hidden sm:inline">Nhập dữ liệu tay (Custom Stdin)</span>
+                  <span className="sm:hidden">Stdin</span>
                 </button>
 
                 <button
                   onClick={() => setActiveBottomTab("console")}
-                  className={`px-3 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 ${
+                  className={`min-h-[34px] px-3 py-1 rounded-md font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
                     activeBottomTab === "console"
                       ? "bg-slate-800 text-slate-200 border border-slate-700"
                       : "text-slate-400 hover:text-slate-200"
@@ -494,7 +597,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                 <button
                   onClick={() => handleRunCode()}
                   disabled={isRunning}
-                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 shadow-xs shadow-emerald-600/30 disabled:opacity-50"
+                  className="min-h-[34px] px-3 py-1 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 shadow-xs shadow-emerald-600/30 disabled:opacity-50 cursor-pointer"
                   title="Chạy thử code (Ctrl + Enter)"
                 >
                   <Play className="w-3 h-3 fill-current" />
@@ -504,10 +607,25 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
             </div>
 
             {/* Tab Contents */}
-            <div className="flex-1 p-3 overflow-y-auto font-mono text-xs">
+            <div className="flex-1 min-h-0 p-3 overflow-y-auto font-mono text-xs">
               {/* TAB 1: TESTCASES */}
               {activeBottomTab === "testcases" && (
                 <div className="space-y-2">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80">
+                    <span className="text-slate-400 font-sans text-xs">
+                      Chạy kiểm tra tự động mã nguồn với các bộ dữ liệu mẫu:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRunAllTestcases}
+                      disabled={isRunning}
+                      className="min-h-[34px] px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-sans font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{isRunning ? "Đang chấm..." : "Chấm tất cả test"}</span>
+                    </button>
+                  </div>
+
                   {testcases.map((tc, idx) => {
                     const result = testResults.find((r) => r.id === tc.id) || testResults[idx];
                     const isPassed = result?.passed;
@@ -576,11 +694,12 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                             <button
                               onClick={() => {
                                 setIsAiOpen(true);
+                                if (window.innerWidth < 768) setMobileTab("ai");
                                 handleSendAiMessage(
                                   `Tại sao mã nguồn của mình lại bị sai ở Test Case #${idx + 1}? (Input là "${tc.input}", kết quả kỳ vọng "${tc.expectedOutput}", nhưng máy in ra "${result?.actualOutput?.trim() || result?.error}"). Hãy gợi ý lỗi logic cho mình với!`
                                 );
                               }}
-                              className="px-2 py-1 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 rounded text-[11px] font-sans font-semibold transition-colors flex items-center gap-1 border border-indigo-700"
+                              className="min-h-[30px] px-2.5 py-1 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 rounded-lg text-[11px] font-sans font-semibold transition-colors flex items-center gap-1 border border-indigo-700 cursor-pointer"
                             >
                               <Bot className="w-3 h-3" />
                               <span>Hỏi AI sửa test này</span>
@@ -620,7 +739,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                     {consoleOutput && (
                       <button
                         onClick={() => setConsoleOutput("")}
-                        className="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+                        className="min-h-[28px] px-2 py-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
                       >
                         Xóa console
                       </button>
@@ -636,8 +755,14 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
         </div>
 
         {/* Right Column: AI Assistant (Gemini) */}
-        {isAiOpen && (
-          <div className="w-80 md:w-96 bg-slate-950 flex flex-col shrink-0 border-l border-slate-800">
+        {(mobileTab === "ai" || isAiOpen) && (
+          <div
+            className={`${
+              mobileTab === "ai"
+                ? "flex-1 flex flex-col bg-slate-950 md:hidden z-30"
+                : "w-80 md:w-96 bg-slate-950 flex flex-col shrink-0 border-l border-slate-800"
+            }`}
+          >
             {/* AI Header */}
             <div className="p-3 bg-indigo-950/60 border-b border-indigo-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -650,25 +775,31 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                 </div>
               </div>
               <button
-                onClick={() => setIsAiOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
+                onClick={() => {
+                  setIsAiOpen(false);
+                  if (mobileTab === "ai") setMobileTab("code");
+                }}
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+                title="Đóng trợ lý AI"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
 
             {/* Quick Prompts Chips */}
-            <div className="p-2 bg-slate-900/80 border-b border-slate-800 flex gap-1.5 overflow-x-auto no-scrollbar">
+            <div className="p-2 bg-slate-900/80 border-b border-slate-800 flex gap-1.5 overflow-x-auto no-scrollbar shrink-0">
               <button
+                type="button"
                 onClick={() => handleSendAiMessage("Bạn có thể giải thích lỗi cú pháp hoặc cảnh báo trong mã này giúp mình không?")}
-                className="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] whitespace-nowrap border border-slate-700 flex items-center gap-1"
+                className="min-h-[30px] px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] whitespace-nowrap border border-slate-700 flex items-center gap-1 cursor-pointer"
               >
                 <AlertTriangle className="w-3 h-3 text-amber-400" />
                 <span>Giải thích lỗi cú pháp</span>
               </button>
               <button
+                type="button"
                 onClick={() => handleSendAiMessage("Hãy gợi ý cho mình thuật toán và các bước logic để giải bài này mà không viết hộ code nhé!")}
-                className="px-2 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] whitespace-nowrap border border-slate-700 flex items-center gap-1"
+                className="min-h-[30px] px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] whitespace-nowrap border border-slate-700 flex items-center gap-1 cursor-pointer"
               >
                 <Lightbulb className="w-3 h-3 text-sky-400" />
                 <span>Gợi ý thuật toán</span>
@@ -676,7 +807,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
             </div>
 
             {/* Chat Messages */}
-            <div className="flex-1 p-3 overflow-y-auto space-y-3 text-xs">
+            <div className="flex-1 min-h-0 p-3 overflow-y-auto space-y-3 text-xs">
               {aiMessages.map((msg) => (
                 <div
                   key={msg.id}
@@ -713,7 +844,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
             </div>
 
             {/* Chat Input */}
-            <div className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2">
+            <div className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2 shrink-0">
               <input
                 type="text"
                 value={aiInput}
@@ -725,12 +856,13 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
                   }
                 }}
                 placeholder="Hỏi AI về cú pháp, gợi ý thuật toán..."
-                className="flex-1 px-3 py-2 bg-slate-950 text-slate-100 text-xs rounded-xl border border-slate-700 focus:outline-none focus:border-indigo-500"
+                className="flex-1 min-h-[44px] px-3 py-2 bg-slate-950 text-slate-100 text-xs rounded-xl border border-slate-700 focus:outline-none focus:border-indigo-500"
               />
               <button
+                type="button"
                 onClick={() => handleSendAiMessage()}
                 disabled={!aiInput.trim() || isAiThinking}
-                className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <Send className="w-4 h-4" />
               </button>

@@ -627,6 +627,10 @@ export const HtmlEditorModule: React.FC<HtmlEditorModuleProps> = ({
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
   const [copiedNotification, setCopiedNotification] = useState<boolean>(false);
 
+  // Mobile (< 768px) and Tablet (768-1199px) responsive layout states
+  const [mobileLabTab, setMobileLabTab] = useState<"code" | "preview" | "ai" | "console">("code");
+  const [tabletViewMode, setTabletViewMode] = useState<"code" | "preview" | "split">("code");
+
   // Console output from iframe
   const [consoleLogs, setConsoleLogs] = useState<{ id: string; type: "log" | "error" | "warn"; text: string; time: string }[]>([]);
   const [isConsoleOpen, setIsConsoleOpen] = useState<boolean>(false);
@@ -937,15 +941,15 @@ ${j}
   };
 
   return (
-    <div className="h-[calc(100vh-65px)] flex flex-col bg-slate-900 text-slate-100 overflow-hidden font-sans">
+    <div className="h-full min-h-0 flex-1 flex flex-col bg-slate-900 text-slate-100 overflow-hidden font-sans">
       {/* ================= TOP TOOLBAR ================= */}
-      <div className="bg-slate-950 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between shrink-0">
+      <div className="bg-slate-950 border-b border-slate-800 px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
         {/* Left: Back & Title */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           {onBack && (
             <button
               onClick={onBack}
-              className="p-1.5 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
+              className="min-h-[36px] sm:min-h-0 px-2.5 py-1.5 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold shrink-0 cursor-pointer"
               title="Quay lại danh sách bài học"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -953,28 +957,62 @@ ${j}
             </button>
           )}
 
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-black text-xs shadow-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-black text-xs shadow-xs shrink-0">
               <Code2 className="w-4 h-4 text-orange-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="font-bold text-sm text-slate-100 tracking-tight">
+                <h1 className="font-bold text-xs sm:text-sm text-slate-100 tracking-tight truncate">
                   {lesson ? lesson.title : "Khu Viết Mã Nguồn HTML & Thiết Kế Web"}
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                <span className="hidden sm:inline px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 shrink-0">
                   HTML5 • CSS3 • JS
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
+              <p className="text-[11px] text-slate-400 hidden xl:block truncate">
                 Gõ mã nguồn trực tiếp, xem trước trang web thời gian thực và kiểm tra tính tương tác
               </p>
             </div>
           </div>
         </div>
 
+        {/* Center: Tablet Mode Switcher (768px - 1199px) */}
+        <div className="hidden md:flex xl:hidden items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setTabletViewMode("code")}
+            className={`min-h-[34px] px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+              tabletViewMode === "code" ? "bg-orange-500 text-slate-950 shadow-xs font-bold" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            Mã nguồn
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTabletViewMode("preview");
+              handleRunCode();
+            }}
+            className={`min-h-[34px] px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+              tabletViewMode === "preview" ? "bg-blue-600 text-white shadow-xs font-bold" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            Xem trước
+          </button>
+          <button
+            type="button"
+            onClick={() => setTabletViewMode("split")}
+            className={`min-h-[34px] px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+              tabletViewMode === "split" ? "bg-slate-700 text-white shadow-xs font-bold" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            Chia đôi
+          </button>
+        </div>
+
         {/* Right: Controls & Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
           {/* Template Selector Dropdown */}
           <div className="hidden lg:flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1 text-xs">
             <span className="text-[11px] text-slate-400">Mẫu:</span>
@@ -991,34 +1029,32 @@ ${j}
             </select>
           </div>
 
-          {/* Refresh / Run Code Preview Button */}
+          {/* Refresh / Run Code Preview Button (Desktop/Tablet) */}
           <button
             onClick={handleRunCode}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30"
+            className="hidden sm:inline-flex min-h-[36px] px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer"
             title="Chạy thử code ngay lập tức (Phím tắt: Ctrl + Enter)"
           >
             <Play className="w-3.5 h-3.5 fill-current text-white" />
-            <span>Chạy thử code (Run)</span>
+            <span>Chạy thử (Run)</span>
           </button>
 
           {/* Copy Code */}
           <button
             onClick={handleCopyCode}
-            className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors text-xs flex items-center gap-1"
+            className="min-h-[36px] min-w-[36px] flex items-center justify-center p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors text-xs cursor-pointer border border-slate-700/60"
             title="Sao chép toàn bộ mã nguồn HTML"
           >
             {copiedNotification ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            <span className="hidden md:inline">{copiedNotification ? "Đã chép!" : "Sao chép"}</span>
           </button>
 
           {/* Download .html File */}
           <button
             onClick={handleDownloadHtml}
-            className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors text-xs flex items-center gap-1"
-            title="Tải về file trang web (.html) để mở trên trình duyệt của bạn"
+            className="hidden sm:flex min-h-[36px] min-w-[36px] items-center justify-center p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors text-xs cursor-pointer border border-slate-700/60"
+            title="Tải về file trang web (.html)"
           >
             <Download className="w-4 h-4" />
-            <span className="hidden md:inline">Tải về .html</span>
           </button>
 
           {/* Submit Work Button (if lesson or submit available) */}
@@ -1026,7 +1062,7 @@ ${j}
             <button
               onClick={handleSubmitSolution}
               disabled={isSubmitting || submittedSuccess}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`min-h-[36px] px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 submittedSuccess
                   ? "bg-emerald-600/50 text-emerald-200 border border-emerald-500/50"
                   : "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20"
@@ -1035,12 +1071,12 @@ ${j}
               {submittedSuccess ? (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  <span>Đã nộp sản phẩm</span>
+                  <span className="hidden sm:inline">Đã nộp</span>
                 </>
               ) : (
                 <>
                   <Send className="w-3.5 h-3.5" />
-                  <span>{isSubmitting ? "Đang nộp..." : "Nộp bài làm"}</span>
+                  <span>{isSubmitting ? "Đang nộp..." : "Nộp bài"}</span>
                 </>
               )}
             </button>
@@ -1049,7 +1085,7 @@ ${j}
           {/* Toggle AI Web Tutor Drawer */}
           <button
             onClick={() => setIsAiDrawerOpen(!isAiDrawerOpen)}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+            className={`min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border cursor-pointer ${
               isAiDrawerOpen
                 ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
                 : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white"
@@ -1057,53 +1093,117 @@ ${j}
             title="Hỏi Trợ lý AI Gia sư Lập trình Web"
           >
             <Bot className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">AI Gia sư Web</span>
+            <span className="hidden sm:inline">AI Gia sư</span>
           </button>
         </div>
       </div>
 
-      {/* ================= MAIN SPLIT WORKSPACE ================= */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+      {/* ================= MOBILE TAB NAVIGATION BAR (< 768px) ================= */}
+      <div className="md:hidden flex items-center bg-slate-950 border-b border-slate-800 shrink-0 px-2 py-1 gap-1">
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("code")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "code"
+              ? "bg-orange-500 text-slate-950 shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <FileCode className="w-4 h-4" />
+          <span>Mã</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMobileLabTab("preview");
+            handleRunCode();
+          }}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "preview"
+              ? "bg-blue-600 text-white shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Eye className="w-4 h-4" />
+          <span>Xem trước</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("ai")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "ai"
+              ? "bg-indigo-600 text-white shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Bot className="w-4 h-4" />
+          <span>Gia sư</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileLabTab("console")}
+          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+            mobileLabTab === "console"
+              ? "bg-emerald-600 text-white shadow-xs font-black"
+              : "text-slate-400 hover:text-white hover:bg-slate-800"
+          }`}
+        >
+          <Terminal className="w-4 h-4" />
+          <span>Nhật ký</span>
+          {consoleLogs.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+        </button>
+      </div>
+
+      {/* ================= MAIN WORKSPACE ================= */}
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
         {/* ============ LEFT HALF: CODE EDITORS ============ */}
-        <div className="flex-1 flex flex-col bg-slate-950 border-r border-slate-800 overflow-hidden">
+        <div
+          className={`flex-1 flex flex-col bg-slate-950 border-r border-slate-800 overflow-hidden ${
+            // On mobile: show only if mobileLabTab === "code"
+            mobileLabTab !== "code" ? "hidden md:flex" : "flex"
+          } ${
+            // On tablet (md to xl): respect tabletViewMode
+            tabletViewMode === "preview" ? "md:hidden xl:flex" : ""
+          }`}
+        >
           {/* Editor Tabs & Quick Snippets Bar */}
           <div className="bg-slate-900 border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
-            {/* 3 Code Tabs */}
+            {/* 3 Code Tabs (HTML, CSS, JS) */}
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setActiveCodeTab("html")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                   activeCodeTab === "html"
                     ? "bg-orange-500 text-slate-950 shadow-xs"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
                 <FileCode className="w-3.5 h-3.5" />
-                <span>HTML (index.html)</span>
+                <span>HTML</span>
               </button>
 
               <button
                 onClick={() => setActiveCodeTab("css")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                   activeCodeTab === "css"
                     ? "bg-sky-500 text-slate-950 shadow-xs"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
                 <Palette className="w-3.5 h-3.5" />
-                <span>CSS (style.css)</span>
+                <span>CSS</span>
               </button>
 
               <button
                 onClick={() => setActiveCodeTab("js")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                   activeCodeTab === "js"
                     ? "bg-amber-400 text-slate-950 shadow-xs"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
                 <Zap className="w-3.5 h-3.5" />
-                <span>JavaScript (script.js)</span>
+                <span>JS</span>
               </button>
             </div>
 
@@ -1111,11 +1211,11 @@ ${j}
             <div className="flex items-center gap-2 text-xs">
               <button
                 onClick={handleRunCode}
-                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1 shadow-xs shadow-emerald-600/30"
-                title="Chạy thử code ngay lập tức (Ctrl + Enter)"
+                className="hidden sm:flex px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg text-xs transition-all items-center gap-1 shadow-xs shadow-emerald-600/30 cursor-pointer"
+                title="Chạy thử code (Ctrl + Enter)"
               >
                 <Play className="w-3 h-3 fill-current" />
-                <span>Chạy thử (Run)</span>
+                <span>Chạy thử</span>
               </button>
 
               <label className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none">
@@ -1125,14 +1225,14 @@ ${j}
                   onChange={(e) => setIsAutoRefresh(e.target.checked)}
                   className="rounded border-slate-700 bg-slate-800 text-emerald-500 focus:ring-0"
                 />
-                <span>Tự động chạy</span>
+                <span>Tự chạy</span>
               </label>
 
               <button
                 onClick={() => setEditorTheme(editorTheme === "vs-dark" ? "light" : "vs-dark")}
-                className="text-[11px] text-slate-400 hover:text-slate-200 bg-slate-800 px-2 py-0.5 rounded"
+                className="text-[11px] text-slate-400 hover:text-slate-200 bg-slate-800 px-2 py-1 rounded cursor-pointer"
               >
-                {editorTheme === "vs-dark" ? "Tối" : "Sáng"}
+                {editorTheme === "vs-dark" ? "🌙 Tối" : "☀️ Sáng"}
               </button>
             </div>
           </div>
@@ -1149,7 +1249,7 @@ ${j}
                 type="button"
                 onClick={() => handleInsertSnippet(snip.snippet)}
                 title={`Chèn mẫu ${snip.desc}`}
-                className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] whitespace-nowrap border border-slate-700/60 transition-colors"
+                className="min-h-[28px] px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] whitespace-nowrap border border-slate-700/60 transition-colors cursor-pointer"
               >
                 {snip.label}
               </button>
@@ -1157,7 +1257,7 @@ ${j}
           </div>
 
           {/* Monaco Editor Container */}
-          <div className="flex-1 relative overflow-hidden">
+          <div className="flex-1 min-h-0 relative overflow-hidden">
             {activeCodeTab === "html" && (
               <Editor
                 height="100%"
@@ -1216,17 +1316,51 @@ ${j}
               />
             )}
           </div>
+
+          {/* Mobile Bottom Quick Actions (in Code tab) */}
+          <div className="md:hidden flex items-center justify-between p-2.5 bg-slate-950 border-t border-slate-800 shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                handleRunCode();
+                setMobileLabTab("preview");
+              }}
+              className="flex-1 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/30 cursor-pointer"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              <span>Chạy & Xem kết quả</span>
+            </button>
+            {onSubmitWork && (
+              <button
+                type="button"
+                onClick={handleSubmitSolution}
+                disabled={isSubmitting || submittedSuccess}
+                className="min-h-[44px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/20 disabled:opacity-50 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>{submittedSuccess ? "Đã nộp" : "Nộp bài"}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ============ RIGHT HALF: INTERACTIVE LIVE PREVIEW ============ */}
-        <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
+        <div
+          className={`flex-1 flex flex-col bg-slate-900 overflow-hidden ${
+            // On mobile: show only if mobileLabTab === "preview"
+            mobileLabTab !== "preview" ? "hidden md:flex" : "flex"
+          } ${
+            // On tablet (md to xl): respect tabletViewMode
+            tabletViewMode === "code" ? "md:hidden xl:flex" : ""
+          }`}
+        >
           {/* Simulated Browser Bar & Device Switcher */}
           <div className="bg-slate-950 border-b border-slate-800 px-3 py-2 flex items-center justify-between gap-3 shrink-0">
             {/* Device Switcher (Desktop / Tablet / Mobile) */}
             <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
               <button
                 onClick={() => setDeviceMode("desktop")}
-                className={`p-1.5 rounded transition-colors ${
+                className={`p-1.5 rounded transition-colors cursor-pointer ${
                   deviceMode === "desktop" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"
                 }`}
                 title="Xem trên Máy tính (100%)"
@@ -1235,7 +1369,7 @@ ${j}
               </button>
               <button
                 onClick={() => setDeviceMode("tablet")}
-                className={`p-1.5 rounded transition-colors ${
+                className={`p-1.5 rounded transition-colors cursor-pointer ${
                   deviceMode === "tablet" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"
                 }`}
                 title="Xem trên Máy tính bảng (768px)"
@@ -1244,7 +1378,7 @@ ${j}
               </button>
               <button
                 onClick={() => setDeviceMode("mobile")}
-                className={`p-1.5 rounded transition-colors ${
+                className={`p-1.5 rounded transition-colors cursor-pointer ${
                   deviceMode === "mobile" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"
                 }`}
                 title="Xem trên Điện thoại (375px)"
@@ -1257,14 +1391,14 @@ ${j}
             <div className="flex-1 max-w-md bg-slate-900 border border-slate-800 rounded-lg px-3 py-1 text-xs text-slate-400 flex items-center gap-2 truncate">
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
               <span className="truncate font-mono text-[11px] text-slate-300">
-                https://lms-k12.vn/live-preview/index.html
+                https://lms-k12.vn/preview/index.html
               </span>
             </div>
 
-            {/* Console Drawer Toggle Button */}
+            {/* Console Drawer Toggle Button (Desktop/Tablet) */}
             <button
               onClick={() => setIsConsoleOpen(!isConsoleOpen)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+              className={`hidden sm:flex px-2.5 py-1 rounded-lg text-xs font-semibold transition-all items-center gap-1.5 border cursor-pointer ${
                 isConsoleOpen || consoleLogs.length > 0
                   ? "bg-slate-800 text-amber-300 border-slate-700"
                   : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200"
@@ -1277,7 +1411,7 @@ ${j}
           </div>
 
           {/* Iframe Live Preview Container with Device Framing */}
-          <div className="flex-1 bg-slate-950/70 p-3 overflow-auto flex items-center justify-center relative">
+          <div className="flex-1 min-h-0 bg-slate-950/70 p-2 sm:p-3 overflow-auto flex items-center justify-center relative">
             <div
               className={`h-full transition-all duration-300 bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col ${
                 deviceMode === "desktop"
@@ -1297,7 +1431,27 @@ ${j}
             </div>
           </div>
 
-          {/* Optional Bottom Console Log Panel */}
+          {/* Mobile Bottom Quick Actions (in Preview tab) */}
+          <div className="md:hidden flex items-center justify-between p-2.5 bg-slate-950 border-t border-slate-800 shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={handleRunCode}
+              className="flex-1 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/30 cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Làm mới trang</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileLabTab("code")}
+              className="min-h-[44px] px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer"
+            >
+              <Code2 className="w-4 h-4" />
+              <span>Sửa mã</span>
+            </button>
+          </div>
+
+          {/* Optional Bottom Console Log Panel (on Desktop/Tablet) */}
           {isConsoleOpen && (
             <div className="h-44 bg-slate-950 border-t border-slate-800 flex flex-col shrink-0">
               <div className="bg-slate-900 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs">
@@ -1308,7 +1462,7 @@ ${j}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setConsoleLogs([])}
-                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 text-[11px] flex items-center gap-1"
+                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 text-[11px] flex items-center gap-1 cursor-pointer"
                     title="Xóa nhật ký console"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -1316,7 +1470,7 @@ ${j}
                   </button>
                   <button
                     onClick={() => setIsConsoleOpen(false)}
-                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200"
+                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -1353,9 +1507,59 @@ ${j}
           )}
         </div>
 
-        {/* ============ RIGHT SLIDE-OVER: AI WEB TUTOR DRAWER ============ */}
-        {isAiDrawerOpen && (
-          <div className="w-full md:w-80 lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col z-30 shrink-0 shadow-2xl">
+        {/* ============ MOBILE-ONLY CONSOLE TAB (< 768px) ============ */}
+        {mobileLabTab === "console" && (
+          <div className="md:hidden flex-1 flex flex-col bg-slate-950 overflow-hidden">
+            <div className="bg-slate-900 px-3 py-2 border-b border-slate-800 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2 text-slate-300 font-bold">
+                <Terminal className="w-4 h-4 text-emerald-400" />
+                <span>Nhật ký Console ({consoleLogs.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConsoleLogs([])}
+                className="min-h-[36px] px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa trắng</span>
+              </button>
+            </div>
+            <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-2">
+              {consoleLogs.length === 0 ? (
+                <div className="text-slate-500 italic text-center py-8">
+                  Chưa có nhật ký. Nhấn "Chạy & Xem kết quả" để thực thi mã nguồn JavaScript.
+                </div>
+              ) : (
+                consoleLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className={`p-2 rounded-lg border ${
+                      log.type === "error"
+                        ? "bg-rose-950/40 border-rose-800 text-rose-300"
+                        : log.type === "warn"
+                        ? "bg-amber-950/40 border-amber-800 text-amber-300"
+                        : "bg-slate-900 border-slate-800 text-slate-200"
+                    }`}
+                  >
+                    <div className="text-[10px] text-slate-500 font-sans">{log.time}</div>
+                    <div className="whitespace-pre-wrap break-all mt-1">{log.text}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ============ AI WEB TUTOR PANEL (Mobile Tab OR Desktop/Tablet Sidebar) ============ */}
+        {(mobileLabTab === "ai" || isAiDrawerOpen) && (
+          <div
+            className={`${
+              // If on mobile: full screen panel
+              mobileLabTab === "ai"
+                ? "flex-1 flex flex-col bg-slate-900 md:hidden z-30"
+                : "w-full md:w-84 lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col z-30 shrink-0 shadow-2xl"
+            }`}
+          >
             {/* Drawer Header */}
             <div className="p-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1368,15 +1572,20 @@ ${j}
                 </div>
               </div>
               <button
-                onClick={() => setIsAiDrawerOpen(false)}
-                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors"
+                type="button"
+                onClick={() => {
+                  setIsAiDrawerOpen(false);
+                  if (mobileLabTab === "ai") setMobileLabTab("code");
+                }}
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                title="Đóng trợ lý AI"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Chat Messages */}
-            <div className="flex-1 p-3 overflow-y-auto space-y-3 text-xs">
+            <div className="flex-1 min-h-0 p-3 overflow-y-auto space-y-3 text-xs">
               {aiMessages.map((msg) => (
                 <div
                   key={msg.id}
@@ -1415,29 +1624,32 @@ ${j}
             </div>
 
             {/* Quick AI Prompts */}
-            <div className="px-3 py-2 bg-slate-950/60 border-t border-slate-800/80 flex flex-wrap gap-1.5 text-[11px]">
+            <div className="px-3 py-2 bg-slate-950/60 border-t border-slate-800/80 flex flex-wrap gap-1.5 text-[11px] shrink-0">
               <button
+                type="button"
                 onClick={() => handleSendAiMessage("Làm sao để căn giữa một thẻ div bằng CSS?")}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="min-h-[30px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
               >
                 Căn giữa thẻ div?
               </button>
               <button
+                type="button"
                 onClick={() => handleSendAiMessage("Giải thích sự khác biệt giữa thẻ <div> và <span>?")}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="min-h-[30px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
               >
                 Khác biệt div & span?
               </button>
               <button
+                type="button"
                 onClick={() => handleSendAiMessage("Kiểm tra xem mã HTML/CSS của mình có bị lỗi gì không?")}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="min-h-[30px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
               >
                 Kiểm tra lỗi mã hiện tại?
               </button>
             </div>
 
             {/* Input form */}
-            <div className="p-3 bg-slate-950 border-t border-slate-800">
+            <div className="p-3 bg-slate-950 border-t border-slate-800 shrink-0">
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -1450,14 +1662,14 @@ ${j}
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
                   placeholder="Hỏi cách dùng thẻ HTML, thuộc tính CSS..."
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="flex-1 min-h-[44px] bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <button
                   type="submit"
                   disabled={!aiInput.trim() || isAiThinking}
-                  className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors disabled:opacity-50"
+                  className="min-h-[44px] min-w-[44px] flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <Send className="w-4 h-4" />
                 </button>
               </form>
             </div>

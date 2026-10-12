@@ -1,1 +1,59 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+    background-color: #f8fafc;
+    color: #0f172a;
+    padding-top: var(--sat);
+    padding-bottom: var(--sab);
+    padding-left: var(--sal);
+    padding-right: var(--sar);
+  }
+
+  /* Prevent iOS automatic zoom when focusing inputs on small screens */
+  @media (max-width: 767px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
+}
+
+/* Touch targets and responsive utility helpers */
+.min-touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Custom scrollbars for code and terminal panels */
+.code-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.code-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.code-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+.code-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

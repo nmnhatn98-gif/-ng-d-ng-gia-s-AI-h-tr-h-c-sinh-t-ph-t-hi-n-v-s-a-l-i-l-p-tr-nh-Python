@@ -673,11 +673,11 @@ export function App() {
 
     if (selectedLesson.moduleType === "coding") {
       return (
-        <div className="min-h-screen bg-slate-950 font-sans">
+        <div className="h-screen h-[100dvh] flex flex-col bg-slate-950 font-sans overflow-hidden">
           {isGuestMode && !currentUser && (
-            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+            <div className="bg-slate-900 border-b border-slate-800 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs shrink-0">
               <span className="flex items-center gap-2">
-                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span className="bg-slate-800 px-2 py-0.5 rounded-md text-[10px] font-bold">Chế độ Khách</span>
                 <span>Bạn đang xem trước bài lập trình. Đăng nhập để lưu mã nguồn và chấm điểm!</span>
               </span>
               <button
@@ -685,18 +685,20 @@ export function App() {
                   setIsGuestMode(false);
                   handleOpenLogin("student");
                 }}
-                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
               >
                 Đăng Nhập / Đăng Ký →
               </button>
             </div>
           )}
-          <CodingModule
-            lesson={selectedLesson}
-            currentUser={activeUser}
-            onBack={() => setSelectedLesson(null)}
-            onSubmitWork={handleSubmitWork}
-          />
+          <div className="flex-1 min-h-0 flex flex-col">
+            <CodingModule
+              lesson={selectedLesson}
+              currentUser={activeUser}
+              onBack={() => setSelectedLesson(null)}
+              onSubmitWork={handleSubmitWork}
+            />
+          </div>
           <LoginModal
             isOpen={isLoginOpen}
             onClose={() => setIsLoginOpen(false)}
@@ -709,11 +711,11 @@ export function App() {
 
     if (selectedLesson.moduleType === "html") {
       return (
-        <div className="min-h-screen bg-slate-950 font-sans">
+        <div className="h-screen h-[100dvh] flex flex-col bg-slate-950 font-sans overflow-hidden">
           {isGuestMode && !currentUser && (
-            <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs">
+            <div className="bg-slate-900 border-b border-slate-800 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs shrink-0">
               <span className="flex items-center gap-2">
-                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">Chế độ Khách</span>
+                <span className="bg-slate-800 px-2 py-0.5 rounded-md text-[10px] font-bold">Chế độ Khách</span>
                 <span>Bạn đang xem trước bài viết mã HTML. Đăng nhập để lưu dự án và gửi giáo viên chấm!</span>
               </span>
               <button
@@ -721,18 +723,20 @@ export function App() {
                   setIsGuestMode(false);
                   handleOpenLogin("student");
                 }}
-                className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
               >
                 Đăng Nhập / Đăng Ký →
               </button>
             </div>
           )}
-          <HtmlEditorModule
-            lesson={selectedLesson}
-            currentUser={activeUser}
-            onBack={() => setSelectedLesson(null)}
-            onSubmitWork={handleSubmitWork}
-          />
+          <div className="flex-1 min-h-0 flex flex-col">
+            <HtmlEditorModule
+              lesson={selectedLesson}
+              currentUser={activeUser}
+              onBack={() => setSelectedLesson(null)}
+              onSubmitWork={handleSubmitWork}
+            />
+          </div>
           <LoginModal
             isOpen={isLoginOpen}
             onClose={() => setIsLoginOpen(false)}
@@ -798,7 +802,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen min-h-[100dvh] flex flex-col bg-slate-50 text-slate-900 font-sans">
       {/* Toast Notification */}
       {notification && (
         <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-bounce">
@@ -808,7 +812,7 @@ export function App() {
 
       {/* Guest Mode Banner */}
       {isGuestMode && !currentUser && (
-        <div className="bg-slate-900 border-b border-slate-800 text-white px-4 py-2 text-xs font-medium flex flex-wrap items-center justify-between gap-2 shadow-xs">
+        <div className="bg-slate-900 border-b border-slate-800 text-white px-4 py-2 text-xs font-medium flex flex-wrap items-center justify-between gap-2 shadow-xs shrink-0">
           <div className="flex items-center gap-2">
             <span className="bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider">
               Chế độ Khách (Xem trước)
@@ -849,7 +853,13 @@ export function App() {
       )}
 
       {/* Body Views */}
-      <main className={activeTab === "html-lab" || activeTab === "python-lab" || activeTab === "teacher-admin" ? "" : "pb-16"}>
+      <main
+        className={`flex-1 min-h-0 flex flex-col ${
+          activeTab === "html-lab" || activeTab === "python-lab" || activeTab === "teacher-admin"
+            ? "overflow-hidden"
+            : "pb-16 overflow-y-auto"
+        }`}
+      >
         {activeTab === "lessons" && (
           <StudentDashboard
             lessons={lessons}
@@ -863,7 +873,7 @@ export function App() {
         )}
 
         {activeTab === "python-lab" && (
-          <div className="h-[calc(100vh-65px)] bg-slate-950">
+          <div className="flex-1 min-h-0 w-full flex flex-col bg-slate-950 overflow-hidden">
             <PythonLabModule
               currentUser={activeUser}
               onBack={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
@@ -873,7 +883,7 @@ export function App() {
         )}
 
         {activeTab === "html-lab" && (
-          <div className="h-[calc(100vh-65px)] bg-slate-950">
+          <div className="flex-1 min-h-0 w-full flex flex-col bg-slate-950 overflow-hidden">
             <HtmlEditorModule
               currentUser={activeUser}
               onBack={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
@@ -900,22 +910,24 @@ export function App() {
         )}
 
         {activeTab === "teacher-admin" && (
-          <TeacherDashboard
-            lessons={lessons}
-            submissions={submissions}
-            classes={classes}
-            currentUser={activeUser}
-            onAddLesson={handleAddLesson}
-            onDeleteLesson={handleDeleteLesson}
-            onGradeSubmission={handleGradeSubmission}
-            onAddClass={handleAddClass}
-            onDeleteClass={handleDeleteClass}
-            onSwitchToStudent={() => setActiveTab("lessons")}
-            onOpenPythonLab={() => setActiveTab("python-lab")}
-            onOpenHtmlLab={() => setActiveTab("html-lab")}
-            onLogout={handleLogout}
-            onOpenLogin={handleOpenLogin}
-          />
+          <div className="flex-1 min-h-0 w-full flex flex-col overflow-hidden">
+            <TeacherDashboard
+              lessons={lessons}
+              submissions={submissions}
+              classes={classes}
+              currentUser={activeUser}
+              onAddLesson={handleAddLesson}
+              onDeleteLesson={handleDeleteLesson}
+              onGradeSubmission={handleGradeSubmission}
+              onAddClass={handleAddClass}
+              onDeleteClass={handleDeleteClass}
+              onSwitchToStudent={() => setActiveTab("lessons")}
+              onOpenPythonLab={() => setActiveTab("python-lab")}
+              onOpenHtmlLab={() => setActiveTab("html-lab")}
+              onLogout={handleLogout}
+              onOpenLogin={handleOpenLogin}
+            />
+          </div>
         )}
       </main>
 

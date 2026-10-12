@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Navbar } from "./components/Navbar";
 import { StudentDashboard } from "./components/StudentDashboard";
+import { StudentResultsView } from "./components/StudentResultsView";
 import { TeacherDashboard } from "./components/TeacherDashboard";
 import { Leaderboard } from "./components/Leaderboard";
 import { ElementaryModule } from "./components/ElementaryModule";
@@ -807,13 +808,13 @@ export function App() {
 
       {/* Guest Mode Banner */}
       {isGuestMode && !currentUser && (
-        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white px-4 py-2 text-xs font-medium flex flex-wrap items-center justify-between gap-2 shadow-xs">
+        <div className="bg-slate-900 border-b border-slate-800 text-white px-4 py-2 text-xs font-medium flex flex-wrap items-center justify-between gap-2 shadow-xs">
           <div className="flex items-center gap-2">
-            <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
+            <span className="bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider">
               Chế độ Khách (Xem trước)
             </span>
-            <span>
-              Bạn đang trải nghiệm hệ thống STEM LMS K12. Đăng nhập hoặc tạo tài khoản để nộp bài và tích lũy điểm!
+            <span className="text-slate-300">
+              Trải nghiệm hệ thống STEM Tin học. Đăng nhập để nộp bài và lưu điểm.
             </span>
           </div>
           <button
@@ -821,14 +822,14 @@ export function App() {
               setIsGuestMode(false);
               handleOpenLogin("student");
             }}
-            className="bg-white text-indigo-800 hover:bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-colors shadow-xs"
           >
-            Đăng Nhập / Đăng Ký →
+            Đăng nhập / Đăng ký
           </button>
         </div>
       )}
 
-      {/* Main Navbar (shown for student/learner views; teacher dashboard has its own neat Azota workspace layout) */}
+      {/* Main Navbar (shown for student/learner views; teacher dashboard has its own workspace layout) */}
       {activeTab !== "teacher-admin" && (
         <Navbar
           currentUser={activeUser}
@@ -879,6 +880,16 @@ export function App() {
               onSubmitWork={handleSubmitWork}
             />
           </div>
+        )}
+
+        {activeTab === "results" && (
+          <StudentResultsView
+            submissions={submissions}
+            lessons={lessons}
+            currentUser={activeUser}
+            onSelectLesson={(lesson) => setSelectedLesson(lesson)}
+            onBackToLessons={() => setActiveTab("lessons")}
+          />
         )}
 
         {activeTab === "leaderboard" && (

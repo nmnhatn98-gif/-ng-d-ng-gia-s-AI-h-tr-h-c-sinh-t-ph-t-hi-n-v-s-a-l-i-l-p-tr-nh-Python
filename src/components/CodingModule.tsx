@@ -37,8 +37,27 @@ export const CodingModule: React.FC<CodingModuleProps> = ({
   onSubmitWork,
 }) => {
   const [language, setLanguage] = useState<"python" | "cpp">(lesson.language === "cpp" ? "cpp" : "python");
-  const [code, setCode] = useState<string>(lesson.starterCode || "");
+  const [code, setCode] = useState<string>(() => {
+    try {
+      const draft = localStorage.getItem(`lms_draft_${currentUser.uid}_${lesson.id}`);
+      if (draft && draft.trim()) return draft;
+    } catch {}
+    return lesson.starterCode || "";
+  });
   const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
+
+  // Persist draft on edit
+  const handleCodeChange = (newVal?: string) => {
+    const val = newVal ?? "";
+    setCode(val);
+    try {
+      if (val.trim() && val !== (lesson.starterCode || "")) {
+        localStorage.setItem(`lms_draft_${currentUser.uid}_${lesson.id}`, val);
+      } else {
+        localStorage.removeItem(`lms_draft_${currentUser.uid}_${lesson.id}`);
+      }
+    } catch {}
+  };
 
   // Execution state
   const [activeBottomTab, setActiveBottomTab] = useState<"testcases" | "custom_input" | "console">("testcases");
@@ -231,6 +250,9 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
         status: "graded",
       });
       setSubmittedSuccess(true);
+      try {
+        localStorage.removeItem(`lms_draft_${currentUser.uid}_${lesson.id}`);
+      } catch {}
     } catch (e) {
       console.error("Submit error:", e);
     } finally {
@@ -404,7 +426,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
               language={language === "cpp" ? "cpp" : "python"}
               theme={theme}
               value={code}
-              onChange={(val) => setCode(val || "")}
+              onChange={handleCodeChange}
               options={{
                 fontSize: 14,
                 fontFamily: "Fira Code, JetBrains Mono, monospace",

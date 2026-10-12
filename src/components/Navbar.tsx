@@ -1,14 +1,9 @@
 import React, { useState } from "react";
 import { UserProfile, GradeLevel, UserRole, Submission } from "../types";
 import { 
-  GraduationCap, 
   Code2, 
-  Cpu, 
   BookOpen, 
   Trophy, 
-  UserCheck, 
-  Sparkles, 
-  LayoutDashboard, 
   LogIn, 
   LogOut, 
   ChevronDown, 
@@ -18,9 +13,11 @@ import {
   Bell,
   CheckCircle2,
   Award,
-  MessageSquare,
   Clock,
-  ExternalLink
+  Sparkles,
+  GraduationCap,
+  Cpu,
+  LayoutDashboard
 } from "lucide-react";
 
 interface NavbarProps {
@@ -50,6 +47,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isPracticeMenuOpen, setIsPracticeMenuOpen] = useState(false);
   const [readSubmissions, setReadSubmissions] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(`lms_read_notifications_${currentUser.uid}`);
@@ -75,7 +73,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     setIsNotificationOpen((prev) => {
       const next = !prev;
       if (next && unreadCount > 0) {
-        // Mark all as read when user opens the notifications tray
         const allIds = studentGradedSubmissions.map((s) => s.id);
         setReadSubmissions(allIds);
         try {
@@ -93,140 +90,191 @@ export const Navbar: React.FC<NavbarProps> = ({
       localStorage.setItem(`lms_read_notifications_${currentUser.uid}`, JSON.stringify(allIds));
     } catch {}
   };
+
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("lessons")}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+          {/* Logo & Tên ứng dụng */}
+          <div
+            className="flex items-center gap-2.5 cursor-pointer select-none"
+            onClick={() => setActiveTab(currentUser.role === "teacher" ? "teacher-admin" : "lessons")}
+          >
+            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs">
               <Code2 className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-slate-900 tracking-tight">STEM Tin Học</span>
-                <span className="text-[11px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700">
-                  LMS K12
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 hidden sm:block">Hệ thống Dạy & Học Đa Cấp học tích hợp AI</p>
-            </div>
+            <span className="font-bold text-base text-slate-900 tracking-tight">
+              STEM Tin học
+            </span>
           </div>
 
           {/* Main Navigation Tabs */}
-          <nav className="flex items-center space-x-1 sm:space-x-2">
-            <button
-              onClick={() => setActiveTab("lessons")}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                activeTab === "lessons"
-                  ? "bg-blue-50 text-blue-700 font-semibold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>Khóa học</span>
-            </button>
-
-            {/* Dedicated Python Programming & Sandbox Lab */}
-            <button
-              onClick={() => setActiveTab("python-lab")}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                activeTab === "python-lab"
-                  ? "bg-emerald-50 text-emerald-800 font-semibold border border-emerald-300 shadow-2xs"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-              title="Mở khu lập trình Python tự do (chạy code, input stdin, gia sư AI không cần vào bài tập)"
-            >
-              <Code2 className="w-4 h-4 text-emerald-600" />
-              <span className="hidden sm:inline">Lập trình Python</span>
-              <span className="sm:hidden">Python</span>
-            </button>
-
-            {/* Dedicated HTML Source Code & Web Lab Button */}
-            <button
-              onClick={() => setActiveTab("html-lab")}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                activeTab === "html-lab"
-                  ? "bg-orange-50 text-orange-700 font-semibold border border-orange-200 shadow-2xs"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-              title="Mở khu thực hành viết mã HTML/CSS/JS với xem trước trực tiếp không cần bài tập"
-            >
-              <FileCode className="w-4 h-4 text-orange-500" />
-              <span className="hidden sm:inline">Viết mã HTML</span>
-              <span className="sm:hidden">HTML</span>
-            </button>
-
-            {currentUser.role === "student" && (
+          {currentUser.role === "student" ? (
+            <nav className="flex items-center space-x-1 sm:space-x-2">
+              {/* 1. Việc học của em */}
               <button
-                onClick={() => setActiveTab("leaderboard")}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                  activeTab === "leaderboard"
-                    ? "bg-amber-50 text-amber-700 font-semibold"
+                type="button"
+                onClick={() => setActiveTab("lessons")}
+                className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                  activeTab === "lessons"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                 }`}
               >
-                <Trophy className="w-4 h-4 text-amber-500" />
-                <span className="hidden sm:inline">Bảng thành tích</span>
-                <span className="sm:hidden">BXH</span>
+                <BookOpen className="w-4 h-4" />
+                <span>Việc học của em</span>
               </button>
-            )}
 
-            {currentUser.role === "teacher" && (
+              {/* 2. Phòng thực hành (Gộp Python & HTML/CSS) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsPracticeMenuOpen((prev) => !prev)}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    activeTab === "python-lab" || activeTab === "html-lab"
+                      ? "bg-blue-50 text-blue-700 font-semibold"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                  }`}
+                >
+                  <Code2 className="w-4 h-4 text-blue-600" />
+                  <span>Phòng thực hành</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {isPracticeMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-30"
+                      onClick={() => setIsPracticeMenuOpen(false)}
+                    />
+                    <div className="absolute left-0 mt-1.5 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 animate-fade-in">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPracticeMenuOpen(false);
+                          setActiveTab("python-lab");
+                        }}
+                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer ${
+                          activeTab === "python-lab" ? "text-blue-600 font-semibold bg-blue-50/50" : "text-slate-700"
+                        }`}
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                          <Code2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900">Python</div>
+                          <div className="text-[11px] text-slate-500">Chạy thử và gỡ lỗi code</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPracticeMenuOpen(false);
+                          setActiveTab("html-lab");
+                        }}
+                        className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer ${
+                          activeTab === "html-lab" ? "text-blue-600 font-semibold bg-blue-50/50" : "text-slate-700"
+                        }`}
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                          <FileCode className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900">HTML/CSS</div>
+                          <div className="text-[11px] text-slate-500">Thiết kế web và xem trước</div>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* 3. Kết quả */}
               <button
+                type="button"
+                onClick={() => setActiveTab("results")}
+                className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                  activeTab === "results" || activeTab === "leaderboard"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <Award className="w-4 h-4 text-amber-500" />
+                <span>Kết quả</span>
+              </button>
+            </nav>
+          ) : (
+            /* Teacher view preserved */
+            <nav className="flex items-center space-x-1 sm:space-x-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab("lessons")}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                  activeTab === "lessons"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <BookOpen className="w-4 h-4" />
+                <span>Xem học sinh</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("python-lab")}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                  activeTab === "python-lab"
+                    ? "bg-emerald-50 text-emerald-800 font-semibold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <Code2 className="w-4 h-4 text-emerald-600" />
+                <span>Python</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("html-lab")}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+                  activeTab === "html-lab"
+                    ? "bg-orange-50 text-orange-700 font-semibold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <FileCode className="w-4 h-4 text-orange-500" />
+                <span>HTML</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveTab("teacher-admin")}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
                   activeTab === "teacher-admin"
                     ? "bg-emerald-50 text-emerald-700 font-semibold"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                 }`}
               >
                 <LayoutDashboard className="w-4 h-4 text-emerald-600" />
-                <span className="hidden sm:inline">Quản trị & Chấm điểm</span>
-                <span className="sm:hidden">Quản trị</span>
+                <span>Quản trị & Chấm điểm</span>
               </button>
-            )}
-          </nav>
+            </nav>
+          )}
 
-          {/* Right Controls: Dedicated Portal Switch & User Profile */}
+          {/* Right Controls: Thông báo & Tài khoản */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Quick Portal Switcher Button */}
-            {currentUser.uid !== "guest-explorer" && (
-              <button
-                onClick={() => onOpenLogin?.(currentUser.role === "teacher" ? "student" : "teacher")}
-                className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs border ${
-                  currentUser.role === "teacher"
-                    ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
-                    : "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
-                }`}
-                title="Nhấn để đổi cổng đăng nhập"
-              >
-                {currentUser.role === "teacher" ? (
-                  <>
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Cổng Giáo Viên</span>
-                  </>
-                ) : (
-                  <>
-                    <GraduationCap className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Cổng Học Sinh</span>
-                  </>
-                )}
-              </button>
-            )}
-
-            {/* Student Graded Notifications Bell Icon */}
+            {/* Student Notifications Bell */}
             {currentUser.role === "student" && (
               <div className="relative">
                 <button
                   type="button"
                   onClick={handleToggleNotifications}
-                  className="relative p-2 rounded-xl text-slate-600 hover:text-blue-600 hover:bg-slate-100 transition-all border border-slate-200"
+                  className="relative p-2 rounded-xl text-slate-600 hover:text-blue-600 hover:bg-slate-100 transition-all border border-slate-200 cursor-pointer"
                   title="Thông báo kết quả chấm bài của bạn"
                 >
                   <Bell className="w-5 h-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow-xs animate-pulse">
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow-xs">
                       {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
                   )}
@@ -239,8 +287,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="fixed inset-0 z-30"
                       onClick={() => setIsNotificationOpen(false)}
                     />
-                    <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 py-3 z-40 animate-fade-in divide-y divide-slate-100 max-h-[32rem] flex flex-col">
-                      {/* Header */}
+                    <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-slate-200 py-3 z-40 animate-fade-in divide-y divide-slate-100 max-h-[30rem] flex flex-col">
                       <div className="px-4 pb-3 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="p-1 rounded-lg bg-blue-50 text-blue-600">
@@ -260,21 +307,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <button
                             type="button"
                             onClick={handleMarkAllRead}
-                            className="text-[11px] text-blue-600 hover:underline font-medium"
+                            className="text-[11px] text-blue-600 hover:underline font-medium cursor-pointer"
                           >
                             Đã đọc tất cả
                           </button>
                         )}
                       </div>
 
-                      {/* Notification List */}
                       <div className="overflow-y-auto p-2 space-y-2 flex-1">
                         {studentGradedSubmissions.length === 0 ? (
                           <div className="py-8 text-center px-4 space-y-2">
                             <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto" />
                             <p className="text-xs font-bold text-slate-700">Chưa có bài nào được chấm điểm</p>
                             <p className="text-[11px] text-slate-400">
-                              Khi giáo viên hoàn tất chấm điểm bài tập hoặc dự án của bạn, thông báo và lời phê sẽ lập tức xuất hiện tại đây.
+                              Khi giáo viên chấm xong bài tập của bạn, thông báo và lời phê sẽ xuất hiện tại đây.
                             </p>
                           </div>
                         ) : (
@@ -294,63 +340,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                                     <Award className="w-4 h-4 text-amber-500 shrink-0" />
                                     <span>{sub.lessonTitle}</span>
                                   </div>
-                                  <span className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <span className="shrink-0 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                                     {sub.score} / {sub.maxScore} đ
                                   </span>
                                 </div>
-
-                                {/* Teacher Feedback if present */}
-                                {sub.teacherFeedback ? (
-                                  <div className="p-2 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700 space-y-0.5">
-                                    <div className="flex items-center gap-1 font-bold text-indigo-700 text-[10px]">
-                                      <MessageSquare className="w-3 h-3 text-indigo-500" />
-                                      <span>Lời phê của Giáo viên:</span>
-                                    </div>
-                                    <p className="italic text-slate-600 pl-4">{sub.teacherFeedback}</p>
-                                  </div>
-                                ) : (
-                                  <p className="text-[10px] text-slate-500">Giáo viên đã chấm bài đạt yêu cầu.</p>
+                                {sub.teacherFeedback && (
+                                  <p className="text-slate-600 text-[11px] line-clamp-2">
+                                    {sub.teacherFeedback}
+                                  </p>
                                 )}
-
-                                {/* Rubric breakdown if available */}
-                                {sub.rubric && (
-                                  <div className="flex items-center gap-2 pt-0.5 text-[10px] text-slate-500">
-                                    <span>Ý tưởng: <strong>{sub.rubric.idea}/10</strong></span>
-                                    <span>•</span>
-                                    <span>Kỹ thuật: <strong>{sub.rubric.technique}/10</strong></span>
-                                    <span>•</span>
-                                    <span>Trình bày: <strong>{sub.rubric.presentation}/10</strong></span>
-                                  </div>
-                                )}
-
-                                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200/60">
-                                  <div className="flex items-center gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    <span>{sub.gradedAt ? new Date(sub.gradedAt).toLocaleDateString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "Vừa xong"}</span>
-                                  </div>
-                                  {onSelectLessonById && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsNotificationOpen(false);
-                                        onSelectLessonById(sub.lessonId);
-                                      }}
-                                      className="text-blue-600 hover:underline font-bold flex items-center gap-0.5"
-                                    >
-                                      <span>Xem bài</span>
-                                      <ExternalLink className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </div>
                               </div>
                             );
                           })
                         )}
-                      </div>
-
-                      {/* Footer */}
-                      <div className="px-4 pt-2 text-center text-[10px] text-slate-400">
-                        Thông báo được đồng bộ tự động theo thời gian thực
                       </div>
                     </div>
                   </>
@@ -358,209 +360,107 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
 
-            {/* Guest Login button OR Profile Dropdown Trigger */}
+            {/* Profile Menu Trigger */}
             {currentUser.uid === "guest-explorer" ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => onOpenLogin?.("student")}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-colors"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Đăng Nhập / Đăng Ký</span>
-                </button>
-                {onLogout && (
-                  <button
-                    onClick={onLogout}
-                    className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors"
-                    title="Trở về trang Đăng ký / Đăng nhập chính"
-                  >
-                    Về Trang Đăng Nhập
-                  </button>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => onOpenLogin?.("student")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs shadow-xs transition-colors cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Đăng nhập</span>
+              </button>
             ) : (
               <div className="relative">
-              <button
-                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1 rounded-2xl hover:bg-slate-100 border border-slate-200 transition-all text-left"
-              >
-                <div
-                  className={`w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs uppercase shadow-xs ${
-                    currentUser.role === "teacher"
-                      ? "bg-gradient-to-tr from-emerald-600 to-teal-500"
-                      : "bg-gradient-to-tr from-blue-600 to-indigo-500"
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1 rounded-xl hover:bg-slate-100 border border-slate-200 transition-all text-left cursor-pointer"
                 >
-                  {currentUser.displayName.charAt(0)}
-                </div>
-                <div className="hidden md:block text-left">
-                  <div className="text-xs font-bold text-slate-800 leading-tight flex items-center gap-1">
-                    <span>{currentUser.displayName}</span>
-                    <ChevronDown className="w-3 h-3 text-slate-400" />
+                  <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase shadow-xs">
+                    {currentUser.displayName.charAt(0)}
                   </div>
-                  <div className="text-[10px] text-slate-500 flex items-center gap-1">
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        currentUser.role === "teacher" ? "bg-emerald-500" : "bg-blue-500"
-                      }`}
-                    ></span>
-                    <span>{currentUser.role === "teacher" ? "Giáo viên Quản trị" : "Học sinh STEM"}</span>
+                  <div className="hidden md:block text-left">
+                    <div className="text-xs font-semibold text-slate-800 leading-tight flex items-center gap-1">
+                      <span>{currentUser.displayName}</span>
+                      <ChevronDown className="w-3 h-3 text-slate-400" />
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {currentUser.classGrade || (currentUser.role === "teacher" ? "Giáo viên" : "Học sinh")}
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
 
-              {/* Profile Dropdown Menu */}
-              {isProfileOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-30"
-                    onClick={() => setIsProfileOpen(false)}
-                  />
-                  <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-40 animate-fade-in divide-y divide-slate-100">
-                    {/* Header info */}
-                    <div className="px-4 py-3 bg-slate-50/50">
-                      <div className="text-xs font-bold text-slate-900">{currentUser.displayName}</div>
-                      <div className="text-[11px] text-slate-500 truncate">{currentUser.email}</div>
-                      {currentUser.classGrade && (
-                        <div className="text-[10px] font-medium text-slate-400 mt-1">
-                          {currentUser.classGrade}
-                        </div>
-                      )}
-                      <div className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 text-slate-700">
-                        {currentUser.role === "teacher" ? "👨‍🏫 Cán bộ Giáo viên" : "👨‍🎓 Học viên K12"}
+                {isProfileOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-30"
+                      onClick={() => setIsProfileOpen(false)}
+                    />
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-40 animate-fade-in divide-y divide-slate-100">
+                      <div className="px-4 py-2.5">
+                        <div className="text-xs font-bold text-slate-900">{currentUser.displayName}</div>
+                        <div className="text-[11px] text-slate-500 truncate">{currentUser.email}</div>
+                        {currentUser.classGrade && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {currentUser.classGrade}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsProfileOpen(false);
+                            if (onLogout) {
+                              onLogout();
+                            } else {
+                              onOpenLogin?.();
+                            }
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <LogOut className="w-4 h-4 text-rose-500" />
+                          <span>Đăng xuất</span>
+                        </button>
                       </div>
                     </div>
-
-                    {/* Actions */}
-                    <div className="p-1.5 space-y-1">
-                      <button
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          onOpenLogin?.("student");
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors text-left"
-                      >
-                        <GraduationCap className="w-4 h-4 text-blue-600" />
-                        <div>
-                          <div className="font-bold">Đăng nhập Cổng Học Sinh</div>
-                          <div className="text-[10px] text-slate-400">Chọn lớp, làm bài & nộp dự án</div>
-                        </div>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          onOpenLogin?.("teacher");
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded-xl transition-colors text-left"
-                      >
-                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                        <div>
-                          <div className="font-bold">Đăng nhập Cổng Giáo Viên</div>
-                          <div className="text-[10px] text-slate-400">Quản trị đề thi, chấm Rubric & bài học</div>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* Logout */}
-                    <div className="p-1.5">
-                      <button
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          if (onLogout) {
-                            onLogout();
-                          } else {
-                            onOpenLogin?.();
-                          }
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                      >
-                        <LogOut className="w-4 h-4 text-red-500" />
-                        <span>Đăng xuất tài khoản</span>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        {/* Subheader Grade Level Filter (Visible on Lessons view) */}
-        {activeTab === "lessons" && (
-          <div className="flex items-center justify-between py-2 overflow-x-auto no-scrollbar border-t border-slate-100">
-            {currentUser.role === "student" ? (
-              <div className="flex items-center justify-between w-full text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">Cấp học của bạn:</span>
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                    {currentUser.gradeLevel === "elementary" && (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Khối Tiểu Học (Lớp 1 - 5)</span>
-                      </>
-                    )}
-                    {currentUser.gradeLevel === "high" && (
-                      <>
-                        <GraduationCap className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Khối THPT (Lớp 10 Python & C++)</span>
-                      </>
-                    )}
-                    {currentUser.gradeLevel === "robotics" && (
-                      <>
-                        <Cpu className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Khối Robotics & STEM</span>
-                      </>
-                    )}
-                    {(currentUser.gradeLevel === "middle" || !currentUser.gradeLevel) && (
-                      <>
-                        <Code2 className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Khối THCS (Lớp 6 - 9)</span>
-                      </>
-                    )}
-                    {currentUser.classGrade && (
-                      <span className="text-slate-400 font-medium border-l border-blue-200 pl-1.5 ml-0.5">
-                        {currentUser.classGrade}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-slate-400 hidden md:flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  <span>Chế độ học sinh: Đang hiển thị bài học và tài liệu mẫu theo đúng cấp học</span>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-400 whitespace-nowrap mr-1">Cấp học:</span>
-                {[
-                  { id: "all", label: "Tất cả cấp học", icon: BookOpen },
-                  { id: "elementary", label: "Tiểu học (Scratch & Máy tính)", icon: Sparkles },
-                  { id: "middle", label: "THCS (Python căn bản)", icon: Code2 },
-                  { id: "high", label: "THPT (Python 10 & C++)", icon: GraduationCap },
-                  { id: "robotics", label: "Robotics & Dự án STEM", icon: Cpu },
-                ].map((lvl) => {
-                  const Icon = lvl.icon;
-                  const isSelected = selectedLevel === lvl.id;
-                  return (
-                    <button
-                      key={lvl.id}
-                      onClick={() => setSelectedLevel(lvl.id as GradeLevel | "all")}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
-                        isSelected
-                          ? "bg-slate-900 text-white shadow-xs"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
-                    >
-                      <Icon className={`w-3.5 h-3.5 ${isSelected ? "text-sky-400" : "text-slate-500"}`} />
-                      <span>{lvl.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+        {/* Subheader Grade Filter ONLY for Teacher preview */}
+        {activeTab === "lessons" && currentUser.role === "teacher" && (
+          <div className="flex items-center gap-2 py-2 overflow-x-auto no-scrollbar border-t border-slate-100 text-xs">
+            <span className="text-xs font-medium text-slate-400 whitespace-nowrap mr-1">Bộ lọc cấp học:</span>
+            {[
+              { id: "all", label: "Tất cả cấp học", icon: BookOpen },
+              { id: "elementary", label: "Tiểu học", icon: Sparkles },
+              { id: "middle", label: "THCS", icon: Code2 },
+              { id: "high", label: "THPT", icon: GraduationCap },
+              { id: "robotics", label: "Robotics & STEM", icon: Cpu },
+            ].map((lvl) => {
+              const Icon = lvl.icon;
+              const isSelected = selectedLevel === lvl.id;
+              return (
+                <button
+                  key={lvl.id}
+                  onClick={() => setSelectedLevel(lvl.id as GradeLevel | "all")}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                    isSelected
+                      ? "bg-slate-900 text-white shadow-xs"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isSelected ? "text-sky-400" : "text-slate-500"}`} />
+                  <span>{lvl.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

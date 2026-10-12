@@ -32,7 +32,16 @@ export const QuizModule: React.FC<QuizModuleProps> = ({
 }) => {
   const questions: QuizQuestion[] = lesson.questions || [];
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>(() => {
+    try {
+      const draft = localStorage.getItem(`lms_draft_${currentUser.uid}_${lesson.id}`);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed && typeof parsed === "object") return parsed;
+      }
+    } catch {}
+    return {};
+  });
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -65,10 +74,16 @@ export const QuizModule: React.FC<QuizModuleProps> = ({
 
   const handleSelectOption = (optionIndex: number) => {
     if (isSubmitted) return;
-    setSelectedAnswers((prev) => ({
-      ...prev,
-      [currentIdx]: optionIndex,
-    }));
+    setSelectedAnswers((prev) => {
+      const updated = {
+        ...prev,
+        [currentIdx]: optionIndex,
+      };
+      try {
+        localStorage.setItem(`lms_draft_${currentUser.uid}_${lesson.id}`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
   };
 
   const answeredCount = Object.keys(selectedAnswers).length;
@@ -123,6 +138,9 @@ export const QuizModule: React.FC<QuizModuleProps> = ({
 
       setIsSubmitted(true);
       setShowConfirmModal(false);
+      try {
+        localStorage.removeItem(`lms_draft_${currentUser.uid}_${lesson.id}`);
+      } catch {}
     } catch (e) {
       console.error("Error submitting quiz:", e);
     } finally {

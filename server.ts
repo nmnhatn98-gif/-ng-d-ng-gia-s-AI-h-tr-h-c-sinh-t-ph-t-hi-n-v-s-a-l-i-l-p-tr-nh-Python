@@ -6,6 +6,9 @@ import dotenv from "dotenv";
 import { exec, spawn } from "child_process";
 import fs from "fs";
 import os from "os";
+import mammoth from "mammoth";
+import * as xlsx from "xlsx";
+import { PDFParse } from "pdf-parse";
 
 dotenv.config();
 
@@ -22,7 +25,18 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "25mb" }));
+app.use((err: any, req: any, res: any, next: any) => {
+  if (err && (err.type === "entity.too.large" || err.status === 413)) {
+    return res.status(413).json({
+      error: "Dung lượng tệp hoặc dữ liệu gửi lên vượt quá giới hạn cho phép (tối đa 15MB). Vui lòng chọn tệp nhỏ hơn.",
+    });
+  }
+  if (err && err.status === 400 && "body" in err) {
+    return res.status(400).json({ error: "Dữ liệu JSON gửi lên không hợp lệ." });
+  }
+  next(err);
+});
 
 // ==========================================
 // PERSISTENT DATA STORAGE SYSTEM
@@ -1296,40 +1310,388 @@ function parseTextQuestionsLocally(text: string) {
   return questions;
 }
 
-// Endpoint: AI Exam File OCR & Intelligent Parsing
+// Helper: Parse questions from structured XLSX rows
+function parseQuestionsFromXlsx(buffer: Buffer): { questions: any[]; rawText: string; warnings: string[] } {
+  const wb = xlsx.read(buffer, { type: "buffer" });
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) {
+    throw new Error("Tệp Excel không chứa bảng tính (sheet) nào.");
+  }
+  const sheet = wb.Sheets[sheetName];
+  const rows: any[][] = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+  if (!rows || rows.length < 2) {
+    throw new Error("Bảng tính Excel cần có ít nhất một dòng tiêu đề và một dòng câu hỏi.");
+  }
+
+  // Find header column indices
+  const headerRow = rows[0].map((h) => String(h || "").trim().toLowerCase());
+  let qCol = headerRow.findIndex((h) => h.includes("câu hỏi") || h.includes("question") || h.includes("nội dung"));
+  if (qCol === -1) qCol = 0; // Default to first column
+
+  const optACol = headerRow.findIndex((h) => h.includes("phương án a") || h.includes("đáp án a") || h === "a" || h === "lựa chọn a");
+  const optBCol = headerRow.findIndex((h) => h.includes("phương án b") || h.includes("đáp án b") || h === "b" || h === "lựa chọn b");
+  const optCCol = headerRow.findIndex((h) => h.includes("phương án c") || h.includes("đáp án c") || h === "c" || h === "lựa chọn c");
+  const optDCol = headerRow.findIndex((h) => h.includes("phương án d") || h.includes("đáp án d") || h === "d" || h === "lựa chọn d");
+  const keyCol = headerRow.findIndex((h) => h.includes("đáp án đúng") || h.includes("đáp án") || h === "key" || h === "answer");
+  const expCol = headerRow.findIndex((h) => h.includes("giải thích") || h.includes("hướng dẫn") || h.includes("explanation"));
+
+  const questions: any[] = [];
+  const textLines: string[] = [];
+  const warnings: string[] = [];
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) continue;
+    const qText = String(row[qCol] || "").trim();
+    if (!qText) continue;
+
+    const optA = optACol !== -1 ? String(row[optACol] || "").trim() : "";
+    const optB = optBCol !== -1 ? String(row[optBCol] || "").trim() : "";
+    const optC = optCCol !== -1 ? String(row[optCCol] || "").trim() : "";
+    const optD = optDCol !== -1 ? String(row[optDCol] || "").trim() : "";
+
+    const options: string[] = [];
+    if (optA) options.push(optA);
+    if (optB) options.push(optB);
+    if (optC) options.push(optC);
+    if (optD) options.push(optD);
+
+    const rawKey = keyCol !== -1 ? String(row[keyCol] || "").trim().toUpperCase() : "";
+    let correctIndex = -1;
+    let hasExplicitAnswer = false;
+    if (rawKey === "A" || rawKey === "0" || rawKey === "1") {
+      correctIndex = 0;
+      hasExplicitAnswer = true;
+    } else if (rawKey === "B" || rawKey === "2") {
+      correctIndex = 1;
+      hasExplicitAnswer = true;
+    } else if (rawKey === "C" || rawKey === "3") {
+      correctIndex = 2;
+      hasExplicitAnswer = true;
+    } else if (rawKey === "D" || rawKey === "4") {
+      correctIndex = 3;
+      hasExplicitAnswer = true;
+    }
+
+    const explanation = expCol !== -1 ? String(row[expCol] || "").trim() : "";
+
+    const questionItem = {
+      id: `q-excel-${Date.now()}-${questions.length + 1}`,
+      question: qText.startsWith("Câu") ? qText : `Câu ${questions.length + 1}: ${qText}`,
+      options: options.length >= 2 ? options : ["Phương án A", "Phương án B", "Phương án C", "Phương án D"],
+      correctIndex: hasExplicitAnswer ? correctIndex : 0,
+      hasExplicitAnswer,
+      explanation: explanation || (hasExplicitAnswer ? "Đáp án từ bảng tính Excel." : "Tài liệu chưa có đáp án, giáo viên vui lòng duyệt đáp án."),
+      level: "thong_hieu",
+      points: 1.0,
+    };
+    questions.push(questionItem);
+
+    textLines.push(questionItem.question);
+    questionItem.options.forEach((opt, idx) => {
+      textLines.push(`${String.fromCharCode(65 + idx)}. ${opt}`);
+    });
+    if (hasExplicitAnswer) {
+      textLines.push(`Đáp án: ${String.fromCharCode(65 + correctIndex)}`);
+    }
+    if (explanation) {
+      textLines.push(`Giải thích: ${explanation}`);
+    }
+    textLines.push("");
+  }
+
+  if (questions.length === 0) {
+    throw new Error("Không tìm thấy hàng câu hỏi hợp lệ trong bảng tính Excel.");
+  }
+
+  return { questions, rawText: textLines.join("\n"), warnings };
+}
+
+// Endpoint 1: Pure Document Text Extraction (No AI hallucination)
+// Flow: Choose file -> Validate Magic Bytes/MIME -> Extract Text -> Return to preview
+app.post("/api/documents/extract-text", async (req, res) => {
+  try {
+    const { fileBase64, fileName, mimeType } = req.body;
+    if (!fileBase64 || !fileName) {
+      return res.status(400).json({ error: "Thiếu dữ liệu tệp (fileBase64 hoặc fileName)." });
+    }
+
+    const cleanBase64 = fileBase64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(cleanBase64, "base64");
+
+    // File size guard: max 15MB
+    if (buffer.length > 15 * 1024 * 1024) {
+      return res.status(400).json({
+        error: `Dung lượng tệp (${(buffer.length / (1024 * 1024)).toFixed(1)}MB) vượt quá giới hạn cho phép (tối đa 15MB).`,
+      });
+    }
+
+    // Determine extension and magic bytes
+    const ext = path.extname(fileName || "").toLowerCase();
+    const isZipOrOffice = buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04;
+    const isPdf = buffer.length >= 4 && buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46; // %PDF
+    const isPng = buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+    const isJpg = buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+
+    // Check for old legacy doc or unsupported formats
+    if (ext === ".doc") {
+      return res.status(400).json({
+        error: "Định dạng Word .doc cũ (nhị phân OLE) không được hỗ trợ trực tiếp. Vui lòng mở tệp trong Microsoft Word hoặc Google Docs và 'Lưu dưới dạng' (Save as) .docx rồi tải lại.",
+        fileType: "doc-legacy",
+        canRetry: true,
+      });
+    }
+    if (ext === ".azt" || ext === ".zip" || ext === ".tex") {
+      return res.status(400).json({
+        error: `Định dạng tệp ${ext.toUpperCase()} chưa được hỗ trợ trích xuất văn bản tự động. Vui lòng chuyển nội dung sang .docx, .pdf hoặc dán văn bản trực tiếp.`,
+        fileType: ext.slice(1),
+        canRetry: true,
+      });
+    }
+
+    // 1. DOCX Handling
+    if (ext === ".docx") {
+      if (!isZipOrOffice) {
+        return res.status(400).json({
+          error: "Tệp DOCX bị hỏng hoặc không đúng định dạng chuẩn OpenXML (thiếu chữ ký ZIP).",
+          fileType: "invalid-docx",
+        });
+      }
+
+      try {
+        const warnings: string[] = [];
+        // Convert to HTML to preserve paragraph order and tables
+        const htmlResult = await mammoth.convertToHtml({ buffer });
+        if (htmlResult.messages && htmlResult.messages.length > 0) {
+          htmlResult.messages.forEach((m) => {
+            if (m.type === "warning") warnings.push(m.message);
+          });
+        }
+
+        // Convert HTML to clean clean text preserving lines, tables, and python indents
+        let html = htmlResult.value || "";
+
+        // Check if file contains images
+        if (html.includes("<img")) {
+          warnings.push("Tài liệu chứa hình ảnh minh họa; hệ thống chỉ trích xuất phần văn bản, thầy/cô vui lòng kiểm tra lại hình ảnh.");
+        }
+
+        // Process tables into readable text rows
+        html = html.replace(/<tr[^>]*>([\s\S]*?)<\/tr>/gi, (_, rowContent) => {
+          const cells: string[] = [];
+          const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+          let cellMatch;
+          while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
+            const cellText = cellMatch[1].replace(/<[^>]+>/g, "").trim();
+            if (cellText) cells.push(cellText);
+          }
+          return cells.length > 0 ? "\n" + cells.join(" | ") + "\n" : "";
+        });
+
+        // Convert paragraphs and linebreaks
+        html = html.replace(/<br\s*\/?>/gi, "\n");
+        html = html.replace(/<\/p>/gi, "\n");
+        html = html.replace(/<\/h[1-6]>/gi, "\n\n");
+        html = html.replace(/<[^>]+>/g, ""); // strip remaining tags
+
+        // Decode basic XML entities
+        let text = html
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&nbsp;/g, " ");
+
+        // Normalize blank lines but preserve indentation for code blocks
+        const cleanedLines = text.split(/\r?\n/).map((l) => l.replace(/\r/g, ""));
+        text = cleanedLines.join("\n").trim();
+
+        if (!text || text.length < 10) {
+          return res.status(400).json({
+            error: "Tệp DOCX không chứa văn bản đọc được hoặc tệp rỗng.",
+          });
+        }
+
+        return res.json({
+          success: true,
+          fileType: "docx",
+          fileName,
+          extractedText: text,
+          characterCount: text.length,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        });
+      } catch (docErr: any) {
+        return res.status(500).json({
+          error: "Không thể giải mã tệp DOCX: " + (docErr.message || "Tệp bị lỗi"),
+        });
+      }
+    }
+
+    // 2. XLSX Handling
+    if (ext === ".xlsx" || ext === ".xls") {
+      try {
+        const { questions, rawText, warnings } = parseQuestionsFromXlsx(buffer);
+        return res.json({
+          success: true,
+          fileType: "xlsx",
+          fileName,
+          extractedText: rawText,
+          characterCount: rawText.length,
+          structuredQuestions: questions,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        });
+      } catch (xlsErr: any) {
+        return res.status(400).json({
+          error: "Không thể trích xuất câu hỏi từ bảng tính Excel: " + (xlsErr.message || "Vui lòng kiểm tra định dạng cột."),
+        });
+      }
+    }
+
+    // 3. PDF Handling
+    if (ext === ".pdf" || isPdf) {
+      if (!isPdf) {
+        return res.status(400).json({
+          error: "Tệp PDF không hợp lệ hoặc bị hỏng chữ ký định dạng (%PDF).",
+        });
+      }
+
+      try {
+        const parser = new PDFParse({ data: buffer });
+        const pdfData = await parser.getText();
+        await parser.destroy();
+
+        // Get text either from combined text or from pages array
+        let extractedText = (pdfData?.text || "").trim();
+        // Remove page number separators like "-- 1 of 2 --"
+        extractedText = extractedText.replace(/--\s*\d+\s+of\s+\d+\s*--/g, "").trim();
+
+        if (!extractedText && pdfData?.pages && pdfData.pages.length > 0) {
+          extractedText = pdfData.pages.map((p: any) => p.text || "").join("\n\n").trim();
+        }
+
+        if (extractedText.length < 5) {
+          // Likely scanned PDF without text layer
+          return res.json({
+            success: true,
+            fileType: "pdf-scan",
+            fileName,
+            extractedText: "",
+            isScanned: true,
+            requiresOCR: true,
+            message: "Tệp PDF không có lớp chữ số (PDF Scan / Ảnh chụp). Hệ thống sẽ chuyển sang chế độ nhận diện hình ảnh/OCR.",
+          });
+        }
+
+        return res.json({
+          success: true,
+          fileType: "pdf",
+          fileName,
+          extractedText,
+          pageCount: pdfData.total || 1,
+          characterCount: extractedText.length,
+        });
+      } catch (pdfErr: any) {
+        return res.status(500).json({
+          error: "Lỗi phân tích tệp PDF: " + (pdfErr.message || "Không thể đọc văn bản từ PDF"),
+        });
+      }
+    }
+
+    // 4. Image Handling (PNG / JPG / JPEG / WEBP)
+    if (isPng || isJpg || ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp") {
+      return res.json({
+        success: true,
+        fileType: "image",
+        fileName,
+        extractedText: "",
+        isImage: true,
+        requiresOCR: true,
+        message: "Tệp ảnh được nhận diện thành công. Sẵn sàng quét OCR trích xuất nội dung đề thi.",
+      });
+    }
+
+    // 5. Plain Text (.txt)
+    if (ext === ".txt") {
+      const text = buffer.toString("utf8");
+      // Check for binary garbage in txt
+      if (/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 500))) {
+        return res.status(400).json({
+          error: "Tệp văn bản chứa ký tự điều khiển nhị phân. Vui lòng kiểm tra lại mã hóa Unicode/UTF-8 của tệp.",
+        });
+      }
+      return res.json({
+        success: true,
+        fileType: "txt",
+        fileName,
+        extractedText: text,
+        characterCount: text.length,
+      });
+    }
+
+    // Fallback unsupported
+    return res.status(400).json({
+      error: `Định dạng tệp '${ext || "không xác định"}' chưa được hỗ trợ. Vui lòng tải tệp .docx, .pdf, .xlsx hoặc ảnh (.png, .jpg).`,
+    });
+  } catch (err: any) {
+    console.error("Extract text error:", err);
+    res.status(500).json({ error: "Lỗi trích xuất tệp: " + (err.message || "Không xác định") });
+  }
+});
+
+// Endpoint 2: AI Exam Intelligent Parsing & Question Separation
+// Only operates on valid UTF-8 text OR genuine image base64
 app.post("/api/gemini/parse-exam-file", async (req, res) => {
   try {
-    const { imageBase64, mimeType = "image/png", textContent, fileName } = req.body;
+    const { imageBase64, mimeType = "image/png", textContent, fileName, isImage } = req.body;
+
+    // Safety guard: reject if textContent looks like binary PK or raw XML
+    if (textContent && typeof textContent === "string") {
+      const preview = textContent.slice(0, 200);
+      if (preview.startsWith("PK") || preview.includes("[Content_Types].xml") || /[\x00-\x08\x0E-\x1F]/.test(preview)) {
+        return res.status(400).json({
+          error: "Nội dung truyền vào chứa dữ liệu nhị phân không hợp lệ. Vui lòng sử dụng tính năng trích xuất văn bản trước khi nhận diện.",
+        });
+      }
+    }
+
     const ai = getAIClient();
 
     if (!ai) {
+      if (isImage || imageBase64) {
+        return res.status(503).json({
+          error: "Dịch vụ nhận diện OCR từ ảnh hiện chưa khả dụng (thiếu cấu hình AI). Vui lòng nhập hoặc dán văn bản đề thi thủ công.",
+        });
+      }
+      const localParsed = parseTextQuestionsLocally(textContent || "");
       return res.json({
         success: true,
         source: "local-parser",
         examTitle: fileName?.replace(/\.[^/.]+$/, "") || "Đề thi mới",
-        questions: parseTextQuestionsLocally(textContent || ""),
-        message: "Đã phân tách câu hỏi bằng bộ phân tích nội dung thông minh.",
+        questions: localParsed,
+        message: "Đã phân tách câu hỏi bằng bộ phân tích cú pháp nội bộ.",
       });
     }
 
-    const prompt = `Bạn là Chuyên gia Khảo thí và Số hóa Đề thi hàng đầu của hệ sinh thái giáo dục trực tuyến (tương tự Azota, K12Online).
-Nhiệm vụ của bạn: Phân tích và trích xuất TOÀN BỘ các câu hỏi kiểm tra/trắc nghiệm từ tài liệu đính kèm (ảnh chụp đề viết tay, ảnh in, hoặc nội dung văn bản).
-Nhận diện chuẩn xác:
-1. Tên đề thi (Ví dụ: "Đề kiểm tra giữa kỳ 1 Tin học 8", "Kiểm tra 15 phút Lập trình Python"...)
-2. Danh sách câu hỏi: Tên câu hỏi, các lựa chọn A, B, C, D
-3. Đáp án đúng: Nhận diện theo dấu khoanh tròn, tích chọn, gạch chân, hoặc bảng đáp án ở cuối trang. Nếu không có đánh dấu, tự động suy luận đáp án chính xác nhất theo kiến thức chuẩn của Bộ GD&ĐT.
-4. Lời giải thích: Giải thích ngắn gọn, xúc tích vì sao chọn đáp án đó.
-5. Mức độ nhận thức: "nhan_biet", "thong_hieu", "van_dung", "van_dung_cao".
+    const prompt = `Bạn là Chuyên gia Khảo thí và Số hóa Đề thi Tin học & STEM.
+Nhiệm vụ: Phân tích tài liệu đề thi và trích xuất TOÀN BỘ các câu hỏi trắc nghiệm / bài tập.
 
-BẮT BUỘC TRẢ VỀ JSON theo cấu trúc sau:
+QUY TẮC BẮT BUỘC VỀ ĐÁP ÁN VÀ NỘI DUNG:
+1. Giữ nguyên tiếng Việt có dấu, xuống dòng, số thứ tự câu, và các lựa chọn A, B, C, D.
+2. Với các đoạn mã lập trình Python/C++/Scratch: BẮT BUỘC giữ nguyên thụt đầu dòng (indentation), dấu hai chấm và xuống dòng chuẩn xác.
+3. KHÔNG ĐƯỢC TỰ BỊA ĐÁP ÁN: 
+   - Chỉ đặt hasExplicitAnswer: true nếu đề thi có đánh dấu đáp án rõ ràng (khoanh tròn, gạch chân, chữ đậm, hoặc có bảng đáp án ở cuối).
+   - Nếu tài liệu KHÔNG có đáp án, đặt hasExplicitAnswer: false. correctIndex chỉ mang tính đề xuất để giáo viên duyệt, và explanation ghi rõ: "Đáp án AI đề xuất, giáo viên cần kiểm tra lại trước khi giao bài."
+4. Trả về đúng cấu trúc JSON sau:
 {
   "examTitle": "Tên đề thi nhận diện được",
   "questions": [
     {
-      "question": "Nội dung câu hỏi đầy đủ",
+      "question": "Nội dung câu hỏi đầy đủ (kể cả đoạn mã nếu có)",
       "options": ["Lựa chọn A", "Lựa chọn B", "Lựa chọn C", "Lựa chọn D"],
       "correctIndex": 0,
-      "explanation": "Lời giải chi tiết ngắn gọn",
+      "hasExplicitAnswer": true,
+      "explanation": "Lời giải thích ngắn gọn",
       "level": "nhan_biet"
     }
   ]
@@ -1350,41 +1712,69 @@ BẮT BUỘC TRẢ VỀ JSON theo cấu trúc sau:
         ],
       };
     } else {
-      contents = `${prompt}\n\nNỘI DUNG TÀI LIỆU:\n"""\n${textContent || ""}\n"""`;
+      if (!textContent || !textContent.trim()) {
+        return res.status(400).json({ error: "Nội dung đề thi trống. Không thể nhận diện câu hỏi." });
+      }
+      contents = `${prompt}\n\nNỘI DUNG TÀI LIỆU CẦN TÁCH CÂU HỎI:\n"""\n${textContent.slice(0, 30000)}\n"""`;
     }
 
     const responseText = await callGeminiGenerate(ai, {
       contents,
-      temperature: 0.2,
+      temperature: 0.1,
       responseMimeType: "application/json",
-      timeoutMs: 12000,
+      timeoutMs: 15000,
     });
-    const parsed = JSON.parse(responseText);
-    const questions = (parsed.questions || []).map((q: any, idx: number) => ({
+
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(responseText);
+    } catch (jsonErr) {
+      console.warn("Gemini response is not pure JSON:", responseText.slice(0, 200));
+    }
+
+    const rawQuestions = Array.isArray(parsed.questions) ? parsed.questions : [];
+    const questions = rawQuestions.map((q: any, idx: number) => ({
       id: `q-exam-${Date.now()}-${idx + 1}`,
       question: String(q.question || `Câu hỏi ${idx + 1}`),
-      options: Array.isArray(q.options) && q.options.length >= 2 ? q.options.map(String) : ["A", "B", "C", "D"],
+      options: Array.isArray(q.options) && q.options.length >= 2 ? q.options.map(String) : ["Phương án A", "Phương án B", "Phương án C", "Phương án D"],
       correctIndex: typeof q.correctIndex === "number" && q.correctIndex >= 0 && q.correctIndex < (q.options?.length || 4) ? q.correctIndex : 0,
-      explanation: String(q.explanation || "Đáp án chuẩn."),
+      hasExplicitAnswer: Boolean(q.hasExplicitAnswer),
+      explanation: String(q.explanation || (q.hasExplicitAnswer ? "Đáp án từ tài liệu gốc." : "Đáp án AI đề xuất, giáo viên cần kiểm tra.")),
       level: q.level || "thong_hieu",
       points: 1.0,
     }));
 
+    if (questions.length === 0 && textContent) {
+      // Local fallback parser
+      const fallbackQuestions = parseTextQuestionsLocally(textContent);
+      return res.json({
+        success: true,
+        examTitle: parsed.examTitle || fileName?.replace(/\.[^/.]+$/, "") || "Đề thi mới",
+        questions: fallbackQuestions,
+        source: "local-parser",
+        message: "Đã phân tách câu hỏi bằng bộ phân tích cú pháp.",
+      });
+    }
+
     return res.json({
       success: true,
       examTitle: parsed.examTitle || fileName?.replace(/\.[^/.]+$/, "") || "Đề thi số hóa mới",
-      questions: questions.length > 0 ? questions : parseTextQuestionsLocally(textContent || ""),
-      source: "gemini-ocr",
+      questions,
+      source: imageBase64 ? "gemini-vision-ocr" : "gemini-smart-parser",
     });
   } catch (err: any) {
     console.error("Exam parse error:", err);
-    return res.json({
-      success: true,
-      source: "fallback-parser",
-      examTitle: req.body.fileName?.replace(/\.[^/.]+$/, "") || "Đề thi số hóa",
-      questions: parseTextQuestionsLocally(req.body.textContent || ""),
-      message: "Đã phân tách câu hỏi theo định dạng cấu trúc đề.",
-    });
+    if (req.body.textContent) {
+      const fallbackQuestions = parseTextQuestionsLocally(req.body.textContent);
+      return res.json({
+        success: true,
+        source: "local-fallback",
+        examTitle: req.body.fileName?.replace(/\.[^/.]+$/, "") || "Đề thi",
+        questions: fallbackQuestions,
+        message: "Không thể gọi dịch vụ AI, hệ thống đã tự động tách câu hỏi theo cú pháp chuẩn.",
+      });
+    }
+    return res.status(500).json({ error: "Lỗi nhận diện đề thi: " + (err.message || "Không xác định") });
   }
 });
 

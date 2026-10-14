@@ -1,5 +1,5 @@
 /**
- * In-Browser & Hybrid Python Execution Engine (GDPT 2018 Tin Học & STEM)
+ * CodeHiểu - In-Browser & Hybrid Python Execution Engine
  * 
  * Đảm bảo 100% mã Python luôn chạy trơn tru, tức thì (<15ms), KHÔNG BAO GIỜ bị lỗi
  * biên dịch hay lỗi 405/302/Network khi publish hoặc share ứng dụng lên Cloud Run/AI Studio.

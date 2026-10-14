@@ -13,6 +13,8 @@ import { PythonLabModule } from "./components/PythonLabModule";
 import { UgotPracticePanel } from "./components/UgotPracticePanel";
 import { LoginModal } from "./components/LoginModal";
 import { AuthPage } from "./components/AuthPage";
+import { AboutModal } from "./components/AboutModal";
+import { Footer } from "./components/Footer";
 import { 
   Lesson, 
   Submission, 
@@ -86,6 +88,11 @@ export function App() {
   // Login Modal State
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
   const [loginInitialRole, setLoginInitialRole] = useState<UserRole>("student");
+  const [isAboutOpen, setIsAboutOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    document.title = "CodeHiểu: Học Python cùng gia sư AI";
+  }, []);
 
   const [activeTab, setActiveTab] = useState<string>("lessons");
   const [selectedLevel, setSelectedLevel] = useState<GradeLevel | "all">("all");
@@ -992,6 +999,7 @@ export function App() {
             const target = lessons.find((l) => l.id === id);
             if (target) setSelectedLesson(target);
           }}
+          onOpenAbout={() => setIsAboutOpen(true)}
         />
       )}
 
@@ -1101,6 +1109,9 @@ export function App() {
             />
           </div>
         )}
+        {activeTab !== "python-lab" && activeTab !== "html-lab" && activeTab !== "ugot-lab" && activeTab !== "teacher-admin" && (
+          <Footer onOpenAbout={() => setIsAboutOpen(true)} />
+        )}
       </main>
 
       {/* Login & Portal Switcher Modal */}
@@ -1109,6 +1120,12 @@ export function App() {
         onClose={() => setIsLoginOpen(false)}
         onSelectUser={handleSelectUser}
         initialRole={loginInitialRole}
+      />
+
+      {/* About CodeHiểu Modal */}
+      <AboutModal
+        isOpen={isAboutOpen}
+        onClose={() => setIsAboutOpen(false)}
       />
     </div>
   );

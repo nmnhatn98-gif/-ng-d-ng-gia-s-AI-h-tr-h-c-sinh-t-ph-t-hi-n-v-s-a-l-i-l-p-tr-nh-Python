@@ -53,7 +53,7 @@ DEFAULT_SERVER_URL = "https://ais-dev-g4kfioxpya7cwymp4ia6p3-286985424202.asia-s
 
 def print_banner():
     print("=" * 65)
-    print("        🤖 CẦU NỐI ROBOT UGOT - LMS TIN HỌC & STEM 🤖")
+    print("        🤖 CẦU NỐI ROBOT UGOT - CODEHIỂU (GIA SƯ AI) 🤖")
     print("            Hỗ trợ Thonny / Python 3.8+ trên Windows")
     print("=" * 65)
 

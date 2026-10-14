@@ -168,7 +168,7 @@ export async function saveStudentsToGoogleDrive(params: {
     fileName = fileName || `LMS_K12_BackupHocSinh_${classLabel}_${timestamp}.json`;
     fileMimeType = "application/json";
     contentBody = JSON.stringify({
-      appName: "STEM K-12 LMS",
+      appName: "CodeHiểu",
       exportedAt: new Date().toISOString(),
       classGrade: className || "all",
       totalStudents: students.length,
@@ -180,10 +180,10 @@ export async function saveStudentsToGoogleDrive(params: {
   const metadata = {
     name: fileName,
     mimeType: fileMimeType,
-    description: `Dữ liệu ${students.length} học sinh hệ thống STEM K-12 LMS (Lớp: ${className || "Tất cả"}) được lưu vào Google Drive lúc ${new Date().toLocaleString("vi-VN")}`,
+    description: `Dữ liệu ${students.length} học sinh hệ thống CodeHiểu (Lớp: ${className || "Tất cả"}) được lưu vào Google Drive lúc ${new Date().toLocaleString("vi-VN")}`,
   };
 
-  const boundary = "-------LMS_STEM_DRIVE_BOUNDARY_" + Date.now();
+  const boundary = "-------CODEHIEU_DRIVE_BOUNDARY_" + Date.now();
   const delimiter = "\r\n--" + boundary + "\r\n";
   const closeDelimiter = "\r\n--" + boundary + "--";
 

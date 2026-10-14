@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Cầu Nối Robot UGOT - LMS Tin Học ^& STEM
+title Cầu Nối Robot UGOT - CodeHiểu
 
 echo =====================================================================
 echo           🤖 KHỞI ĐỘNG CẦU NỐI ROBOT UGOT TRÊN WINDOWS 🤖

@@ -19,7 +19,8 @@ import {
   Cpu,
   LayoutDashboard,
   Menu,
-  X
+  X,
+  Info
 } from "lucide-react";
 
 interface NavbarProps {
@@ -33,6 +34,7 @@ interface NavbarProps {
   onLogout?: () => void;
   submissions?: Submission[];
   onSelectLessonById?: (lessonId: string) => void;
+  onOpenAbout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -46,6 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   submissions = [],
   onSelectLessonById,
+  onOpenAbout,
 }) => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -304,6 +307,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Controls: Thông báo & Tài khoản */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Giới thiệu ứng dụng CodeHiểu */}
+            {onOpenAbout && (
+              <button
+                type="button"
+                onClick={onOpenAbout}
+                className="p-2 rounded-xl text-slate-600 hover:text-blue-600 hover:bg-slate-100 transition-all border border-slate-200 cursor-pointer hidden sm:flex items-center gap-1.5 text-xs font-semibold"
+                title="Giới thiệu CodeHiểu: Học Python cùng gia sư AI"
+              >
+                <Info className="w-4 h-4 text-blue-600" />
+                <span className="hidden lg:inline text-slate-700">Giới thiệu</span>
+              </button>
+            )}
+
             {/* Student Notifications Bell */}
             {currentUser.role === "student" && (
               <div className="relative">
@@ -681,6 +697,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>HTML Lab</span>
                   </button>
                 </>
+              )}
+
+              {onOpenAbout && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileDrawerOpen(false);
+                    onOpenAbout();
+                  }}
+                  className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 text-blue-700 bg-blue-50/70 hover:bg-blue-100 transition-colors cursor-pointer"
+                >
+                  <Info className="w-5 h-5 text-blue-600" />
+                  <span>Giới thiệu CodeHiểu</span>
+                </button>
               )}
             </nav>
 

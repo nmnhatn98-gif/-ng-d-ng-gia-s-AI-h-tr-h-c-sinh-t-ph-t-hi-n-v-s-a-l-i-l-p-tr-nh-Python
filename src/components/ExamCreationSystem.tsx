@@ -953,7 +953,7 @@ D. Lặp vô hạn không dừng
                 <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 shadow-2xs flex items-center justify-center gap-2.5 text-xs sm:text-sm text-slate-700 font-medium">
                   <Megaphone className="w-4 h-4 text-blue-600 shrink-0" />
                   <span>
-                    <strong>Hệ thống LMS</strong> hỗ trợ nhận dạng đề từ file tài liệu và ảnh chụp đề kiểm tra
+                    <strong>CodeHiểu</strong> hỗ trợ nhận dạng đề từ file tài liệu và ảnh chụp đề kiểm tra
                   </span>
                 </div>
               </div>
@@ -987,7 +987,7 @@ D. Lặp vô hạn không dừng
                           Tự soạn Đề thi / Bài tập
                         </h4>
                         <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                          Sử dụng trình soạn thảo của LMS để tạo Bài tập/Đề thi. Chỉnh sửa từ các mẫu có sẵn hoặc Copy & Paste từ các nguồn khác nhau.{" "}
+                          Sử dụng trình soạn thảo của CodeHiểu để tạo Bài tập/Đề thi. Chỉnh sửa từ các mẫu có sẵn hoặc Copy & Paste từ các nguồn khác nhau.{" "}
                           <span className="text-blue-600 font-medium">Tìm hiểu thêm</span>
                         </p>
                       </div>

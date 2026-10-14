@@ -1,0 +1,16 @@
+{
+  "name": "CodeHiểu: Học Python cùng gia sư AI",
+  "short_name": "CodeHiểu",
+  "description": "CodeHiểu: Ứng dụng gia sư AI hỗ trợ học sinh tự phát hiện và sửa lỗi lập trình Python. Hiểu từng dòng mã – Tự tin sửa từng lỗi.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 # HƯỚNG DẪN CẦU NỐI PYTHON ROBOT UGOT TRÊN WINDOWS
-*(Dành cho Giáo viên và Học sinh - Hệ thống LMS Tin học & STEM)*
+*(Dành cho Giáo viên và Học sinh - Hệ thống CodeHiểu: Học Python cùng gia sư AI)*
 
 ---
 

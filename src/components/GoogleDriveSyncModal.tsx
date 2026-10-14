@@ -158,7 +158,7 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   // Import from Drive file
   const handleImportFile = async (file: GoogleDriveFile) => {
     const confirmImport = window.confirm(
-      `Bạn có muốn nhập dữ liệu từ tệp "${file.name}" trên Google Drive vào hệ thống LMS không? Các học sinh sẽ được bổ sung vào danh sách lớp.`
+      `Bạn có muốn nhập dữ liệu từ tệp "${file.name}" trên Google Drive vào hệ thống CodeHiểu không? Các học sinh sẽ được bổ sung vào danh sách lớp.`
     );
     if (!confirmImport) return;
 
@@ -594,7 +594,7 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
                             onClick={() => handleImportFile(file)}
                             disabled={isImporting}
                             className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 flex items-center gap-1 transition-colors"
-                            title="Khôi phục/Nhập học sinh vào LMS"
+                            title="Khôi phục/Nhập học sinh vào CodeHiểu"
                           >
                             <CloudDownload className="w-3.5 h-3.5" />
                             <span>Nhập</span>
@@ -622,7 +622,7 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
         <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between text-xs text-slate-500">
           <div className="flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Phạm vi quyền: <code>drive.file</code> (Chỉ truy cập tệp do LMS tạo)</span>
+            <span>Phạm vi quyền: <code>drive.file</code> (Chỉ truy cập tệp do CodeHiểu tạo)</span>
           </div>
           <button
             type="button"

@@ -169,14 +169,24 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {/* 1. Header: Chào tài khoản & Lớp học */}
-      <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-          Chào {currentUser.displayName || "em"}!
-        </h1>
-        <p className="text-sm text-slate-600 mt-1">
-          {currentUser.classGrade || `Khối ${studentRegisteredGrade}`}
-          {currentUser.school ? ` · ${currentUser.school}` : ""}
-        </p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200/60 text-blue-700 text-xs font-semibold flex items-center gap-1.5">
+              <Code2 className="w-3.5 h-3.5" />
+              <span>CodeHiểu</span>
+            </span>
+            <span className="text-xs text-slate-400">·</span>
+            <span className="text-xs text-slate-500 font-medium">Học Python cùng gia sư AI</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+            Chào {currentUser.displayName || "em"}!
+          </h1>
+          <p className="text-sm text-slate-600 mt-0.5">
+            {currentUser.classGrade || `Khối ${studentRegisteredGrade}`}
+            {currentUser.school ? ` · ${currentUser.school}` : ""}
+          </p>
+        </div>
       </div>
 
       {/* Thông báo lỗi tải dữ liệu nếu có */}

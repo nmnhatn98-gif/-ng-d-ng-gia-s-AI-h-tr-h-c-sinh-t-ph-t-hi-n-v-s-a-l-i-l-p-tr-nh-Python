@@ -7,8 +7,9 @@ coverage/
 .env*
 !.env.example
 
-# Runtime persistence data & accounts
-data/
+# Runtime persistence data & accounts (protect root data/ only, allow src/data/)
+/data/
+!src/data/
 server_data/
 students_vault.json
 teachers.json

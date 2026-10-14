@@ -545,6 +545,7 @@ export function App() {
       submissionType: newLessonData.submissionType || "file_upload",
       maxScore: newLessonData.maxScore ?? 10,
       allowReviewAfterDue: newLessonData.allowReviewAfterDue ?? true,
+      requireSelfExplanation: newLessonData.requireSelfExplanation ?? false,
       createdAt: new Date().toISOString(),
     };
 
@@ -564,6 +565,25 @@ export function App() {
     } catch (e) {
       console.warn("Firestore save fallback:", e);
       showToast("Đã thêm bài tập vào danh sách!");
+    }
+  };
+
+  // Update Lesson Handler (e.g., toggle requireSelfExplanation)
+  const handleUpdateLesson = async (lessonId: string, updates: Partial<Lesson>) => {
+    setLessons((prev) => {
+      const updated = prev.map((l) => (l.id === lessonId ? { ...l, ...updates } : l));
+      try {
+        localStorage.setItem("lms_lessons", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    try {
+      await updateDoc(doc(db, "lessons", lessonId), updates);
+      showToast("✅ Đã cập nhật cấu hình bài tập!");
+    } catch (e) {
+      console.warn("Firestore update lesson fallback:", e);
+      showToast("Đã cập nhật bài tập!");
     }
   };
 
@@ -1129,6 +1149,7 @@ export function App() {
               classes={classes}
               currentUser={activeUser}
               onAddLesson={handleAddLesson}
+              onUpdateLesson={handleUpdateLesson}
               onDeleteLesson={handleDeleteLesson}
               onGradeSubmission={handleGradeSubmission}
               onAddClass={handleAddClass}

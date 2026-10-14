@@ -113,6 +113,7 @@ export interface Lesson {
   submissionType?: "online_text" | "file_upload" | "code_editor" | "quiz";
   maxScore?: number;
   allowReviewAfterDue?: boolean;
+  requireSelfExplanation?: boolean; // Yêu cầu học sinh tự giải thích khi nộp bài
 }
 
 export interface Submission {
@@ -173,9 +174,14 @@ export interface AiHintItem {
 }
 
 export interface StudentReflection {
-  errorEncountered: string; // Em gặp lỗi gì?
-  errorReason: string;       // Vì sao xảy ra lỗi?
-  howFixed: string;          // Em đã sửa như thế nào?
+  mode: "error_and_fixed" | "correct_first_try"; // Em đã gặp lỗi và sửa lại / Em làm đúng ngay và trình bày cách kiểm tra
+  errorEncountered: string; // 1. Em phát hiện lỗi hoặc vấn đề gì?
+  errorReason: string;       // 2. Theo em, nguyên nhân là gì?
+  howFixed: string;          // 3. Em đã sửa như thế nào?
+  verifiedWith: string;      // 4. Em đã kiểm tra lại bằng dữ liệu nào và kết quả ra sao?
+  selectedBeforeRunId?: string; // Mốc chạy trước khi sửa (liên kết với nhật ký)
+  selectedAfterRunId?: string;  // Mốc chạy sau khi sửa (liên kết với nhật ký)
+  updatedAt?: string;
 }
 
 export interface TeacherDebugEvaluation {

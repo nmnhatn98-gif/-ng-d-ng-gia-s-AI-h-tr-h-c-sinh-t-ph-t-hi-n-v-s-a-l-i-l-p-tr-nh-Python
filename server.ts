@@ -18,6 +18,7 @@ import {
   getFirestore as getFbFirestore, 
   collection as fbCol, 
   getDocs as fbGetDocs, 
+  getDoc as fbGetDoc,
   setDoc as fbSetDoc, 
   doc as fbDoc 
 } from "firebase/firestore";
@@ -821,6 +822,142 @@ app.post("/api/auth/student-login", async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi đăng nhập học sinh: " + err.message });
+  }
+});
+
+// Change Student Password endpoint
+app.post("/api/auth/change-password", async (req, res) => {
+  try {
+    const { studentId, oldPassword, newPassword } = req.body;
+    if (!studentId || !newPassword) {
+      return res.status(400).json({ error: "Thiếu mã định danh học sinh hoặc mật khẩu mới." });
+    }
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ error: "Mật khẩu mới phải có tối thiểu 6 ký tự." });
+    }
+
+    const students = readJsonData<any[]>("students.json", []);
+    const vault = readJsonData<any[]>("students_vault.json", []);
+
+    const targetStudent = students.find((s) => s.uid === studentId) || vault.find((s) => s.uid === studentId);
+    if (!targetStudent) {
+      return res.status(404).json({ error: "Không tìm thấy hồ sơ học sinh để đổi mật khẩu." });
+    }
+
+    // If oldPassword is provided, verify it
+    if (oldPassword && targetStudent.passwordHash) {
+      const isValid = verifyPassword(oldPassword, targetStudent.passwordHash, targetStudent.password);
+      if (!isValid) {
+        return res.status(401).json({ error: "Mật khẩu hiện tại không chính xác." });
+      }
+    }
+
+    const newHash = hashPassword(newPassword);
+    const updatedAt = new Date().toISOString();
+
+    targetStudent.passwordHash = newHash;
+    targetStudent.mustChangePassword = false;
+    targetStudent.updatedAt = updatedAt;
+    delete targetStudent.password; // Do not store plaintext
+
+    writeJsonData("students.json", students);
+    writeJsonData("students_vault.json", vault);
+
+    // Sync to Firestore
+    if (fbDb) {
+      try {
+        await fbSetDoc(
+          fbDoc(fbDb, "users", studentId),
+          {
+            passwordHash: newHash,
+            mustChangePassword: false,
+            updatedAt,
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn("Firestore change-password sync notice:", e);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Đã cập nhật mật khẩu mới thành công!",
+      student: sanitizeStudent(targetStudent),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi đổi mật khẩu: " + err.message });
+  }
+});
+
+// --- Python Lab Drafts & Self-Explanation APIs ---
+// 1. Get draft
+app.get("/api/drafts/python", async (req, res) => {
+  try {
+    const studentId = String(req.query.studentId || "");
+    const lessonId = String(req.query.lessonId || "free");
+    if (!studentId) {
+      return res.status(400).json({ error: "Thiếu studentId." });
+    }
+
+    const draftKey = `${studentId}_${lessonId}`;
+    const drafts = readJsonData<Record<string, any>>("drafts_python.json", {});
+    let draft = drafts[draftKey];
+
+    // If not in local file, check Firestore
+    if (!draft && fbDb) {
+      try {
+        const snap = await fbGetDoc(fbDoc(fbDb, "drafts", draftKey));
+        if (snap.exists()) {
+          draft = snap.data();
+          drafts[draftKey] = draft;
+          writeJsonData("drafts_python.json", drafts);
+        }
+      } catch (e) {}
+    }
+
+    return res.json({ success: true, draft: draft || null });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tải bản nháp: " + err.message });
+  }
+});
+
+// 2. Save draft
+app.post("/api/drafts/python", async (req, res) => {
+  try {
+    const { studentId, lessonId, code, reflection, stdin, debugRuns } = req.body;
+    if (!studentId) {
+      return res.status(400).json({ error: "Thiếu studentId khi lưu bản nháp." });
+    }
+
+    const draftKey = `${studentId}_${lessonId || "free"}`;
+    const drafts = readJsonData<Record<string, any>>("drafts_python.json", {});
+
+    const draftData = {
+      studentId,
+      lessonId: lessonId || "free",
+      code: typeof code === "string" ? code : "",
+      reflection: reflection || null,
+      stdin: typeof stdin === "string" ? stdin : "",
+      debugRuns: Array.isArray(debugRuns) ? debugRuns.slice(-20) : [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    drafts[draftKey] = draftData;
+    writeJsonData("drafts_python.json", drafts);
+
+    // Persist to Firestore drafts collection
+    if (fbDb) {
+      try {
+        await fbSetDoc(fbDoc(fbDb, "drafts", draftKey), draftData, { merge: true });
+      } catch (e) {
+        console.warn("Firestore save draft notice:", e);
+      }
+    }
+
+    return res.json({ success: true, savedAt: draftData.updatedAt });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi lưu bản nháp: " + err.message });
   }
 });
 

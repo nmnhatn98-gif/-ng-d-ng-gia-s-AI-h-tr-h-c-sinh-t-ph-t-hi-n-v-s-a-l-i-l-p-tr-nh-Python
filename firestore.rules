@@ -54,6 +54,11 @@ service cloud.firestore {
       allow delete: if isTeacher();
     }
 
+    // Drafts collection (Bản nháp thực hành Python & Lời tự giải thích quá trình sửa lỗi)
+    match /drafts/{draftId} {
+      allow read, write: if true;
+    }
+
     // Trusted teachers list
     match /trusted_teachers/{userId} {
       allow read: if true;

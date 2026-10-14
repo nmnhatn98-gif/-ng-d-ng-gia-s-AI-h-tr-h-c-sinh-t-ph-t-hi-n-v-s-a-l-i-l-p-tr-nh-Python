@@ -44,7 +44,8 @@ import {
   HardDrive,
   Cpu,
   Loader2,
-  Users
+  Users,
+  PenLine
 } from "lucide-react";
 import { ExamCreationSystem } from "./ExamCreationSystem";
 import { StudentAccountManager } from "./StudentAccountManager";
@@ -60,6 +61,7 @@ interface TeacherDashboardProps {
   classes: ClassItem[];
   currentUser?: UserProfile;
   onAddLesson: (newLesson: Partial<Lesson>) => Promise<void>;
+  onUpdateLesson?: (lessonId: string, updates: Partial<Lesson>) => Promise<void> | void;
   onDeleteLesson: (lessonId: string) => Promise<void>;
   onGradeSubmission: (submissionId: string, rubric: RubricCriteria, score: number, feedback: string) => Promise<void>;
   onAddClass?: (newClass: ClassItem) => Promise<void> | void;
@@ -80,6 +82,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   classes,
   currentUser,
   onAddLesson,
+  onUpdateLesson,
   onDeleteLesson,
   onGradeSubmission,
   onAddClass,
@@ -126,6 +129,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [assignmentTypeFilter, setAssignmentTypeFilter] = useState<string>("all");
   const [isUnifiedCreateAssignmentOpen, setIsUnifiedCreateAssignmentOpen] = useState(false);
   const [isExamSystemOpen, setIsExamSystemOpen] = useState(false);
+  const [isCreateAssignmentModalOpen, setIsCreateAssignmentModalOpen] = useState(false);
 
   // Classes States
   const [isCreateClassOpen, setIsCreateClassOpen] = useState(false);
@@ -1494,8 +1498,37 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             return (
                               <tr key={les.id} className="hover:bg-slate-50/80 transition-colors">
                                 <td className="py-3.5 px-4 font-bold text-slate-900">
-                                  {les.title}
-                                  <div className="text-[11px] text-slate-400 font-normal line-clamp-1">{les.description}</div>
+                                  <div className="flex items-center gap-2">
+                                    <span>{les.title}</span>
+                                    {les.requireSelfExplanation && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                        ✍️ Cần tự giải thích
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <div className="text-[11px] text-slate-400 font-normal line-clamp-1">{les.description}</div>
+                                    {les.moduleType === "coding" && (
+                                      <button
+                                        type="button"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          if (onUpdateLesson) {
+                                            await onUpdateLesson(les.id, { requireSelfExplanation: !les.requireSelfExplanation });
+                                          }
+                                        }}
+                                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer shrink-0 ${
+                                          les.requireSelfExplanation
+                                            ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
+                                            : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
+                                        }`}
+                                        title="Bấm để bật hoặc tắt yêu cầu học sinh tự giải thích khi nộp bài"
+                                      >
+                                        <PenLine className="w-2.5 h-2.5 text-amber-600" />
+                                        <span>{les.requireSelfExplanation ? "Bắt buộc giải thích" : "Không bắt buộc"}</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-3.5 px-4">
                                   <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-700">
@@ -1839,32 +1872,128 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     {/* TAB CONTENT B: PROCESS & DEBUG DIARY */}
                     {detailTab === "process" && (
                       <div className="space-y-6 pt-2">
-                        {/* Student Self-Reflection Answers */}
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                          <h3 className="font-bold text-slate-900 text-sm">
-                            Phần tự giải thích của học sinh (3 câu hỏi tự nhận thức lỗi):
-                          </h3>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div className="bg-white p-3 rounded-xl border border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-500 uppercase">1. Em gặp lỗi gì?</span>
-                              <p className="text-xs text-slate-800 mt-1 font-medium whitespace-pre-wrap">
-                                {selectedSubForDetail.content?.debugSession?.reflection?.errorEncountered || "(Chưa điền)"}
-                              </p>
+                        {/* Student Self-Reflection Answers (GDPT 2018 Metacognition 4-questions) */}
+                        {(() => {
+                          const reflection = selectedSubForDetail.content?.debugSession?.reflection;
+                          const hasExplanation = Boolean(
+                            reflection &&
+                            (reflection.errorEncountered?.trim() ||
+                             reflection.errorReason?.trim() ||
+                             reflection.howFixed?.trim() ||
+                             reflection.verifiedWith?.trim())
+                          );
+
+                          if (!hasExplanation) {
+                            return (
+                              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-center space-y-1">
+                                <div className="text-sm font-bold text-slate-700">Chưa có lời giải thích</div>
+                                <p className="text-xs text-slate-400">
+                                  Học sinh chưa hoàn thành phần tự giải thích cho bài nộp này.
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                                    <span>Phần tự giải thích của học sinh (4 câu hỏi tự nhận thức & sửa lỗi):</span>
+                                  </h3>
+                                  <p className="text-[11px] text-slate-500">
+                                    Minh chứng độc lập do học sinh tự trình bày, không bị AI tự động can thiệp.
+                                  </p>
+                                </div>
+                                <div>
+                                  {reflection.mode === "correct_first_try" ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      🎯 Làm đúng ngay & Giải trình kiểm thử
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      🛠️ Gặp lỗi & Tự sửa lại
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                  <span className="text-[11px] font-bold text-blue-700 uppercase block mb-1">
+                                    1. Lỗi / Vấn đề phát hiện:
+                                  </span>
+                                  <p className="text-xs text-slate-800 font-medium whitespace-pre-wrap leading-relaxed">
+                                    {reflection.errorEncountered || "(Chưa điền)"}
+                                  </p>
+                                </div>
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                  <span className="text-[11px] font-bold text-amber-700 uppercase block mb-1">
+                                    2. Nguyên nhân theo em:
+                                  </span>
+                                  <p className="text-xs text-slate-800 font-medium whitespace-pre-wrap leading-relaxed">
+                                    {reflection.errorReason || "(Chưa điền)"}
+                                  </p>
+                                </div>
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                  <span className="text-[11px] font-bold text-purple-700 uppercase block mb-1">
+                                    3. Cách em đã sửa:
+                                  </span>
+                                  <p className="text-xs text-slate-800 font-medium whitespace-pre-wrap leading-relaxed">
+                                    {reflection.howFixed || "(Chưa điền)"}
+                                  </p>
+                                </div>
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                  <span className="text-[11px] font-bold text-emerald-700 uppercase block mb-1">
+                                    4. Dữ liệu & kết quả kiểm tra:
+                                  </span>
+                                  <p className="text-xs text-slate-800 font-medium whitespace-pre-wrap leading-relaxed">
+                                    {reflection.verifiedWith || "(Chưa điền)"}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Linked Runs if student selected before/after milestones */}
+                              {(reflection.selectedBeforeRunId || reflection.selectedAfterRunId) && (
+                                <div className="pt-2 border-t border-slate-200/80 text-xs">
+                                  <span className="text-[11px] font-bold text-slate-600 block mb-1.5 uppercase">
+                                    Mốc đối chiếu nhật ký chạy mã liên kết:
+                                  </span>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                                    <div className="bg-rose-50/60 p-2 rounded-lg border border-rose-200">
+                                      <span className="font-bold text-rose-800 block">Mốc trước khi sửa:</span>
+                                      {(() => {
+                                        const bRunId = reflection.selectedBeforeRunId;
+                                        const bRun = selectedSubForDetail.content?.debugSession?.runs?.find((r: any) => r.id === bRunId);
+                                        if (!bRun) return <span className="text-slate-500 italic">Chưa chọn mốc</span>;
+                                        return (
+                                          <div className="mt-1 space-y-0.5 font-mono">
+                                            <div className="text-slate-700">{bRun.timestamp} • {bRun.passed ? "Thành công" : "Báo lỗi"}</div>
+                                            {bRun.error && <div className="text-rose-600 truncate">{bRun.error}</div>}
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                    <div className="bg-emerald-50/60 p-2 rounded-lg border border-emerald-200">
+                                      <span className="font-bold text-emerald-800 block">Mốc sau khi sửa:</span>
+                                      {(() => {
+                                        const aRunId = reflection.selectedAfterRunId;
+                                        const aRun = selectedSubForDetail.content?.debugSession?.runs?.find((r: any) => r.id === aRunId);
+                                        if (!aRun) return <span className="text-slate-500 italic">Chưa chọn mốc</span>;
+                                        return (
+                                          <div className="mt-1 space-y-0.5 font-mono">
+                                            <div className="text-slate-700">{aRun.timestamp} • {aRun.passed ? "Thành công" : "Báo lỗi"}</div>
+                                            {aRun.output && <div className="text-emerald-700 truncate">{aRun.output}</div>}
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                            <div className="bg-white p-3 rounded-xl border border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-500 uppercase">2. Vì sao xảy ra lỗi?</span>
-                              <p className="text-xs text-slate-800 mt-1 font-medium whitespace-pre-wrap">
-                                {selectedSubForDetail.content?.debugSession?.reflection?.errorReason || "(Chưa điền)"}
-                              </p>
-                            </div>
-                            <div className="bg-white p-3 rounded-xl border border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-500 uppercase">3. Em đã sửa như thế nào?</span>
-                              <p className="text-xs text-slate-800 mt-1 font-medium whitespace-pre-wrap">
-                                {selectedSubForDetail.content?.debugSession?.reflection?.howFixed || "(Chưa điền)"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
+                          );
+                        })()}
 
                         {/* Code Evolution: Initial Code vs Final Code */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -2382,24 +2511,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 type="button"
                 onClick={() => {
                   setIsUnifiedCreateAssignmentOpen(false);
-                  onAddLesson({
-                    title: "Thực hành Python: Tự phát hiện và sửa lỗi cú pháp",
-                    description: "Học sinh chạy thử, nhận gợi ý AI theo 3 mức và tự sửa lỗi.",
-                    level: "middle",
-                    moduleType: "coding",
-                    language: "python",
-                    starterCode: `# Viết chương trình tính tổng các số từ 1 đến n\nn = int(input())\ntong = 0\nfor i in range(1, n + 1):\n    tong += i\nprint(tong)`,
-                  });
+                  setIsCreateAssignmentModalOpen(true);
                 }}
-                className="w-full p-3.5 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 text-left transition-all flex items-start gap-3"
+                className="w-full p-3.5 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/50 text-left transition-all flex items-start gap-3 cursor-pointer"
               >
                 <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold">
                   🐍
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-slate-900">Bài tập thực hành Python với Gia sư AI</div>
+                  <div className="font-bold text-sm text-slate-900">Bài tập thực hành Python (Tùy chọn Yêu cầu Tự giải thích)</div>
                   <div className="text-xs text-slate-500 mt-0.5">
-                    Tạo bài lập trình Python có sẵn code khởi tạo, bộ chạy in-browser và chu trình phản hồi lỗi.
+                    Thiết lập bài lập trình Python, hạn nộp, phân công lớp và cấu hình yêu cầu học sinh tự giải thích khi nộp bài.
                   </div>
                 </div>
               </button>
@@ -2407,6 +2529,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Create Assignment Modal (supports Require Self-Explanation configuration) */}
+      <CreateAssignmentModal
+        isOpen={isCreateAssignmentModalOpen}
+        onClose={() => setIsCreateAssignmentModalOpen(false)}
+        onSaveAssignment={onAddLesson}
+        classes={classes}
+        initialGrade="Khối 10"
+        initialSubject="Tin học"
+      />
 
       {/* Exam & Quiz Creation System Modal */}
       <ExamCreationSystem

@@ -94,6 +94,7 @@ export const CreateAssignmentModal: React.FC<CreateAssignmentModalProps> = ({
   const [maxScore, setMaxScore] = useState<number>(10);
   const [durationMinutes, setDurationMinutes] = useState<number>(45);
   const [allowReviewAfterDue, setAllowReviewAfterDue] = useState(true);
+  const [requireSelfExplanation, setRequireSelfExplanation] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Editor Toolbar State
@@ -220,6 +221,7 @@ export const CreateAssignmentModal: React.FC<CreateAssignmentModalProps> = ({
         maxScore,
         durationMinutes,
         allowReviewAfterDue,
+        requireSelfExplanation,
       });
 
       onClose();
@@ -733,6 +735,22 @@ export const CreateAssignmentModal: React.FC<CreateAssignmentModalProps> = ({
                     className="w-4 h-4 text-blue-600 rounded-md border-slate-300"
                   />
                   <span>Cho phép học sinh xem đáp án và nhận xét chi tiết sau khi nộp bài hoặc hết hạn</span>
+                </label>
+
+                {/* Requirement 5: Yêu cầu học sinh tự giải thích khi nộp bài */}
+                <label className="flex items-start gap-2.5 cursor-pointer text-xs font-semibold text-amber-900 bg-amber-50/90 p-3 rounded-xl border border-amber-200 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={requireSelfExplanation}
+                    onChange={(e) => setRequireSelfExplanation(e.target.checked)}
+                    className="w-4 h-4 text-amber-600 rounded-md border-amber-300 mt-0.5"
+                  />
+                  <div>
+                    <span className="font-bold text-amber-950">Yêu cầu học sinh tự giải thích khi nộp bài</span>
+                    <p className="text-[11px] text-amber-800 font-normal mt-0.5">
+                      Bắt buộc học sinh hoàn thành 4 câu hỏi tự giải thích (lỗi gặp phải, nguyên nhân, cách sửa, dữ liệu kiểm tra) trước khi nộp bài. Phòng thực hành tự do hoặc bài không bật mục này sẽ không bắt buộc.
+                    </p>
+                  </div>
                 </label>
               </div>
             )}

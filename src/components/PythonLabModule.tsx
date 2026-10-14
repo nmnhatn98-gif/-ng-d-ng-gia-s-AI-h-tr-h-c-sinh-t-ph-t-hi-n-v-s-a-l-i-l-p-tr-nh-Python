@@ -13,6 +13,7 @@ import {
 } from "../types";
 import { executeCodeHybrid, PYTHON_RUNTIME_COMPATIBILITY_INFO } from "../lib/pythonRunner";
 import { UgotPracticePanel } from "./UgotPracticePanel";
+import { StudentSelfExplanationForm } from "./StudentSelfExplanationForm";
 import {
   Play,
   RotateCcw,
@@ -44,7 +45,15 @@ import {
   Cpu,
   RefreshCw,
   FolderOpen,
+  PenLine,
+  Loader2,
+  CheckCheck,
+  GitCommit,
+  FileEdit,
+  ExternalLink,
 } from "lucide-react";
+import { db } from "../firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export interface PythonLabModuleProps {
   currentUser: UserProfile;
@@ -249,10 +258,10 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   const [execTime, setExecTime] = useState<number | null>(null);
   const [isError, setIsError] = useState<boolean>(false);
 
-  // Bottom pane tab: "output" | "stdin" | "diary"
-  const [bottomTab, setBottomTab] = useState<"output" | "stdin" | "diary">("output");
+  // Bottom pane tab: "output" | "stdin" | "diary" | "explanation"
+  const [bottomTab, setBottomTab] = useState<"output" | "stdin" | "diary" | "explanation">("output");
 
-  // Resizable bottom pane height ratio: 0.35 (default 35% height)
+  // Resizable bottom pane height ratio: 0.38 (default 38% height)
   const [bottomPaneRatio, setBottomPaneRatio] = useState<number>(0.38);
   const [isResizing, setIsResizing] = useState<boolean>(false);
 
@@ -265,8 +274,17 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   // Cheatsheet slide-over panel
   const [isCheatsheetOpen, setIsCheatsheetOpen] = useState<boolean>(false);
 
-  // Save draft status
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  // Self-Explanation full-screen modal
+  const [isExplanationModalOpen, setIsExplanationModalOpen] = useState<boolean>(false);
+
+  // Server draft persistence status
+  const [serverSaveStatus, setServerSaveStatus] = useState<"idle" | "unsaved" | "saving" | "saved" | "error">("saved");
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+
+  // Session & starter code references
+  const starterCodeRef = useRef<string>(currentLesson?.starterCode || code);
+  const sessionStartTimeRef = useRef<string>(new Date().toISOString());
 
   // Submit status
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -277,8 +295,8 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
     ? submissions.find((s) => s.lessonId === currentLesson.id && (s.studentId === currentUser.uid || s.studentEmail === currentUser.email))
     : null;
 
-  // Mobile Lab active tab: "problem" | "code" | "output" | "ai"
-  const [mobileTab, setMobileTab] = useState<"problem" | "code" | "output" | "ai">("code");
+  // Mobile Lab active tab: "problem" | "code" | "output" | "explanation" | "ai"
+  const [mobileTab, setMobileTab] = useState<"problem" | "code" | "output" | "explanation" | "ai">("code");
 
   // AI Assistant states
   const [isAiOpen, setIsAiOpen] = useState<boolean>(true);
@@ -299,22 +317,184 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
 
   // Debug runs log for the diary
   const [debugRuns, setDebugRuns] = useState<DebugRunItem[]>([]);
+
+  // Self-Explanation state (GDPT 2018 4-question metacognition model)
   const [reflection, setReflection] = useState<StudentReflection>({
+    mode: "error_and_fixed",
     errorEncountered: "",
     errorReason: "",
     howFixed: "",
+    verifiedWith: "",
+    selectedBeforeRunId: undefined,
+    selectedAfterRunId: undefined,
   });
+
+  // Persistent server draft saving
+  const saveDraftToServer = async (manual = false) => {
+    const studentId = currentUser.uid;
+    const lessonId = currentLesson?.id || "free";
+    if (!studentId) return;
+
+    setServerSaveStatus("saving");
+    setSaveErrorMessage(null);
+    try {
+      const payload = {
+        studentId,
+        lessonId,
+        code,
+        stdin: stdinInput,
+        reflection,
+        debugRuns,
+      };
+
+      // 1. Save to server API endpoint
+      let serverSaved = false;
+      try {
+        const res = await fetch("/api/drafts/python", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          serverSaved = true;
+        }
+      } catch (e) {
+        console.warn("Server draft endpoint notice:", e);
+      }
+
+      // 2. Direct Firestore save
+      let firestoreSaved = false;
+      try {
+        const draftKey = `${studentId}_${lessonId}`;
+        await setDoc(doc(db, "drafts", draftKey), {
+          ...payload,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        firestoreSaved = true;
+      } catch (e) {
+        console.warn("Firestore draft save notice:", e);
+      }
+
+      // 3. Fallback cache in localStorage
+      try {
+        const draftKey = getDraftKey(currentLesson?.id);
+        localStorage.setItem(draftKey, code);
+        localStorage.setItem(`${draftKey}_reflection`, JSON.stringify(reflection));
+        localStorage.setItem(`${draftKey}_stdin`, stdinInput);
+      } catch (e) {}
+
+      if (serverSaved || firestoreSaved) {
+        setServerSaveStatus("saved");
+        setIsCodeDirty(false);
+        const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        setLastSavedTime(now);
+      } else {
+        throw new Error("Không thể kết nối máy chủ lưu dữ liệu. Bản nháp đang được lưu an toàn trên thiết bị.");
+      }
+    } catch (err: any) {
+      console.error("Draft save error:", err);
+      setServerSaveStatus("error");
+      setSaveErrorMessage(err.message || "Lỗi lưu bản nháp.");
+    }
+  };
+
+  // Debounced auto-save effect
+  const autoSaveTimeoutRef = useRef<any>(null);
+  const isInitialLoadRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    if (isInitialLoadRef.current) {
+      return;
+    }
+    setServerSaveStatus("unsaved");
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      saveDraftToServer(false);
+    }, 2000);
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [code, stdinInput, reflection]);
+
+  // Load draft from Server API and Firestore on mount or when switching lesson
+  useEffect(() => {
+    let isCancelled = false;
+    const lessonId = currentLesson?.id || "free";
+    const studentId = currentUser.uid;
+
+    async function loadLatestDraft() {
+      if (!studentId) return;
+      try {
+        // 1. Try server endpoint
+        const res = await fetch(`/api/drafts/python?studentId=${encodeURIComponent(studentId)}&lessonId=${encodeURIComponent(lessonId)}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (!isCancelled && json.draft) {
+            if (json.draft.code) setCode(json.draft.code);
+            if (json.draft.stdin !== undefined) setStdinInput(json.draft.stdin);
+            if (json.draft.reflection) setReflection(json.draft.reflection);
+            if (Array.isArray(json.draft.debugRuns) && json.draft.debugRuns.length > 0) {
+              setDebugRuns(json.draft.debugRuns);
+            }
+            setServerSaveStatus("saved");
+            setLastSavedTime(new Date(json.draft.updatedAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+            setTimeout(() => { isInitialLoadRef.current = false; }, 300);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Server draft load notice:", e);
+      }
+
+      // 2. Direct Firestore fallback
+      try {
+        const draftKey = `${studentId}_${lessonId}`;
+        const snap = await getDoc(doc(db, "drafts", draftKey));
+        if (!isCancelled && snap.exists()) {
+          const draft = snap.data();
+          if (draft.code) setCode(draft.code);
+          if (draft.stdin !== undefined) setStdinInput(draft.stdin);
+          if (draft.reflection) setReflection(draft.reflection);
+          if (Array.isArray(draft.debugRuns)) setDebugRuns(draft.debugRuns);
+          setServerSaveStatus("saved");
+          setLastSavedTime(new Date(draft.updatedAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+          setTimeout(() => { isInitialLoadRef.current = false; }, 300);
+          return;
+        }
+      } catch (e) {}
+
+      // 3. Fallback to localStorage
+      try {
+        const draftKey = getDraftKey(currentLesson?.id);
+        const savedCode = localStorage.getItem(draftKey);
+        const savedRef = localStorage.getItem(`${draftKey}_reflection`);
+        if (savedCode) setCode(savedCode);
+        if (savedRef) setReflection(JSON.parse(savedRef));
+      } catch (e) {}
+
+      setTimeout(() => { isInitialLoadRef.current = false; }, 300);
+    }
+
+    loadLatestDraft();
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentLesson?.id, currentUser.uid]);
 
   // Switch lesson with automatic draft save to prevent code loss
   const handleSwitchToLesson = (newLesson: Lesson | null) => {
     // 1. Auto save draft for current lesson before switching
-    try {
-      const currentDraftKey = getDraftKey(currentLesson?.id);
-      localStorage.setItem(currentDraftKey, code);
-    } catch (e) {}
+    saveDraftToServer(true);
 
     // 2. Set new lesson
     setCurrentLesson(newLesson);
+    starterCodeRef.current = newLesson?.starterCode || "";
+    sessionStartTimeRef.current = new Date().toISOString();
     if (onSelectLesson) onSelectLesson(newLesson);
 
     // 3. Load draft or starter code for new lesson
@@ -328,14 +508,25 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
     setSubmitSuccessMsg(null);
     setIsProblemExpanded(Boolean(newLesson));
 
+    // Reset reflection
+    setReflection({
+      mode: "error_and_fixed",
+      errorEncountered: "",
+      errorReason: "",
+      howFixed: "",
+      verifiedWith: "",
+      selectedBeforeRunId: undefined,
+      selectedAfterRunId: undefined,
+    });
+
     // Reset AI greeting for new problem
     setAiMessages([
       {
         id: `ai-greet-${Date.now()}`,
         role: "assistant",
         content: newLesson
-          ? `Đã chuyển sang bài **${newLesson.title}**. Em hãy đọc kỹ đề bài và bắt đầu viết chương trình nhé!`
-          : `Đã chuyển sang chế độ **Thực hành Python tự do**. Em có thể tự do viết mã lệnh hoặc tra cứu sổ tay cú pháp.`,
+          ? `Đã chuyển sang bài **${newLesson.title}**. Em hãy đọc kỹ đề bài, bắt đầu viết chương trình và ghi lại quá trình tự giải thích nhé!`
+          : `Đã chuyển sang chế độ **Thực hành Python tự do**. Em có thể tự do viết mã lệnh, tra cứu sổ tay cú pháp hoặc tự rút kinh nghiệm.`,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       },
     ]);
@@ -345,19 +536,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
 
   // Save draft explicitly
   const handleSaveDraft = () => {
-    setSaveStatus("saving");
-    try {
-      const draftKey = getDraftKey(currentLesson?.id);
-      localStorage.setItem(draftKey, code);
-      setIsCodeDirty(false);
-      setTimeout(() => {
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus("idle"), 2500);
-      }, 200);
-    } catch (e) {
-      console.warn("Failed to save draft:", e);
-      setSaveStatus("idle");
-    }
+    saveDraftToServer(true);
   };
 
   // Run Code
@@ -430,7 +609,41 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
     if (!currentLesson) return;
     if (!onSubmitWork) return;
 
-    if (!confirm(`Bạn có chắc chắn muốn nộp bài làm cho bài "${currentLesson.title}" không?`)) {
+    // Requirement 5: Check if teacher required self-explanation
+    if (currentLesson.requireSelfExplanation) {
+      const missingFields: string[] = [];
+      if (!reflection.errorEncountered?.trim()) {
+        missingFields.push("1. Em phát hiện lỗi hoặc vấn đề gì?");
+      }
+      if (!reflection.errorReason?.trim()) {
+        missingFields.push("2. Theo em, nguyên nhân là gì?");
+      }
+      if (!reflection.howFixed?.trim()) {
+        missingFields.push("3. Em đã sửa như thế nào?");
+      }
+      if (!reflection.verifiedWith?.trim()) {
+        missingFields.push("4. Em đã kiểm tra lại bằng dữ liệu nào và kết quả ra sao?");
+      }
+
+      if (missingFields.length > 0) {
+        // Keep code and draft intact & persist to server
+        handleSaveDraft();
+
+        alert(
+          `⚠️ Bài tập "${currentLesson.title}" yêu cầu học sinh tự giải thích khi nộp bài.\n\n` +
+          `Mã nguồn và bản nháp của em đã được giữ nguyên và lưu an toàn.\n\n` +
+          `Vui lòng hoàn thành các mục còn thiếu trong biểu mẫu Tự giải thích:\n` +
+          missingFields.map((f) => ` • ${f}`).join("\n")
+        );
+
+        setBottomTab("explanation");
+        setMobileTab("explanation");
+        setIsExplanationModalOpen(true);
+        return;
+      }
+    }
+
+    if (!confirm(`Bạn có chắc chắn muốn nộp bài làm cho bài "${currentLesson.title}" kèm phần Tự giải thích không?`)) {
       return;
     }
 
@@ -438,6 +651,17 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
     try {
       // Auto-save draft first
       handleSaveDraft();
+
+      const finalReflection: StudentReflection = {
+        mode: reflection.mode || "error_and_fixed",
+        errorEncountered: (reflection.errorEncountered || "").trim(),
+        errorReason: (reflection.errorReason || "").trim(),
+        howFixed: (reflection.howFixed || "").trim(),
+        verifiedWith: (reflection.verifiedWith || "").trim(),
+        selectedBeforeRunId: reflection.selectedBeforeRunId || undefined,
+        selectedAfterRunId: reflection.selectedAfterRunId || undefined,
+        updatedAt: new Date().toISOString(),
+      };
 
       await onSubmitWork({
         id: existingSubmission?.id || `sub-${Date.now()}`,
@@ -452,6 +676,21 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
           language: "python",
           stdin: stdinInput,
           consoleOutput,
+          debugSession: {
+            sessionId: `session-${Date.now()}`,
+            studentId: currentUser.uid,
+            studentName: currentUser.displayName,
+            studentCode: currentUser.studentCode,
+            lessonId: currentLesson.id,
+            lessonTitle: currentLesson.title,
+            startedAt: sessionStartTimeRef.current || new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            initialCode: starterCodeRef.current || currentLesson.starterCode || "",
+            finalCode: code,
+            runs: debugRuns,
+            hints: [],
+            reflection: finalReflection,
+          },
         },
         status: "submitted",
         score: null,
@@ -459,7 +698,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
         submittedAt: new Date().toISOString(),
       });
 
-      setSubmitSuccessMsg(`🎉 Đã nộp bài thành công! Thầy cô sẽ sớm xem và chấm điểm bài của bạn.`);
+      setSubmitSuccessMsg(`🎉 Đã nộp bài và lời giải thích thành công! Thầy cô sẽ xem minh chứng và phản hồi kết quả cho em.`);
     } catch (err: any) {
       alert("Lỗi khi nộp bài: " + (err.message || "Vui lòng kiểm tra lại kết nối mạng!"));
     } finally {
@@ -646,28 +885,59 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
             </button>
           )}
 
-          {/* Save Draft */}
+          {/* Self-Explanation Quick Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setBottomTab("explanation");
+              setMobileTab("explanation");
+            }}
+            className="h-8 px-2.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="Mở biểu mẫu Tự giải thích quá trình sửa lỗi"
+          >
+            <PenLine className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Viết giải thích</span>
+            <span className="sm:hidden">Giải thích</span>
+          </button>
+
+          {/* Save Draft on Server */}
           <button
             type="button"
             onClick={handleSaveDraft}
+            disabled={serverSaveStatus === "saving"}
             className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer border ${
-              saveStatus === "saved"
-                ? "bg-emerald-950/60 text-emerald-300 border-emerald-700"
+              serverSaveStatus === "saved"
+                ? "bg-emerald-950/60 text-emerald-300 border-emerald-700 hover:bg-emerald-900/60"
+                : serverSaveStatus === "saving"
+                ? "bg-blue-950/60 text-blue-300 border-blue-700"
+                : serverSaveStatus === "error"
+                ? "bg-rose-950/60 text-rose-300 border-rose-700 hover:bg-rose-900/60"
                 : isCodeDirty
                 ? "bg-slate-800 text-amber-300 border-amber-600/40 hover:bg-slate-700"
                 : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white"
             }`}
-            title="Lưu bản nháp"
+            title="Lưu bản nháp mã nguồn và lời giải thích lên máy chủ"
           >
-            {saveStatus === "saved" ? (
+            {serverSaveStatus === "saved" ? (
               <>
                 <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden md:inline">Đã lưu</span>
+                <span className="hidden md:inline">Đã lưu máy chủ</span>
+                <span className="md:hidden">Đã lưu</span>
+              </>
+            ) : serverSaveStatus === "saving" ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                <span className="hidden md:inline">Đang lưu...</span>
+              </>
+            ) : serverSaveStatus === "error" ? (
+              <>
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden md:inline">Lưu lỗi (Thử lại)</span>
               </>
             ) : (
               <>
                 <Save className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Lưu</span>
+                <span className="hidden md:inline">Lưu nháp</span>
               </>
             )}
           </button>
@@ -679,7 +949,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
               onClick={handleSubmitAssignment}
               disabled={isSubmitting}
               className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-              title="Nộp bài cho giáo viên"
+              title="Nộp bài và lời giải thích cho giáo viên"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>Nộp bài</span>
@@ -735,8 +1005,8 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
         </div>
       </header>
 
-      {/* MOBILE TAB BAR (<768px: [Đề bài] [Mã nguồn] [Kết quả] [Gia sư AI]) */}
-      <div className="md:hidden h-10 bg-slate-950 border-b border-slate-800 grid grid-cols-4 px-2 gap-1 shrink-0 z-10 text-xs font-medium">
+      {/* MOBILE TAB BAR (<768px: [Đề bài] [Mã nguồn] [Kết quả] [Tự giải thích] [Gia sư AI]) */}
+      <div className="md:hidden h-10 bg-slate-950 border-b border-slate-800 grid grid-cols-5 px-1.5 gap-1 shrink-0 z-10 text-xs font-medium">
         <button
           type="button"
           onClick={() => setMobileTab("problem")}
@@ -747,7 +1017,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
           }`}
         >
           <FileCode className="w-3.5 h-3.5" />
-          <span>Đề bài</span>
+          <span>Đề</span>
         </button>
         <button
           type="button"
@@ -763,9 +1033,12 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
         </button>
         <button
           type="button"
-          onClick={() => setMobileTab("output")}
+          onClick={() => {
+            setBottomTab("output");
+            setMobileTab("output");
+          }}
           className={`py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer relative ${
-            mobileTab === "output"
+            mobileTab === "output" && bottomTab === "output"
               ? "bg-slate-800 text-white font-semibold"
               : "text-slate-400 hover:text-slate-200"
           }`}
@@ -773,6 +1046,24 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
           <Terminal className="w-3.5 h-3.5" />
           <span>Kết quả</span>
           {isError && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 absolute top-2 right-2" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setBottomTab("explanation");
+            setMobileTab("explanation");
+          }}
+          className={`py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer relative ${
+            mobileTab === "explanation" || bottomTab === "explanation"
+              ? "bg-amber-600/30 text-amber-300 font-semibold border border-amber-500/40"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <PenLine className="w-3.5 h-3.5" />
+          <span>Giải thích</span>
+          {reflection.errorEncountered && reflection.howFixed && (
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute top-2 right-1.5" />
+          )}
         </button>
         <button
           type="button"
@@ -879,7 +1170,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
           {/* B. CODE EDITOR AREA */}
           <div
             className={`min-h-0 w-full relative ${
-              mobileTab === "problem" || mobileTab === "output" ? "hidden md:flex flex-col" : "flex flex-col"
+              mobileTab === "problem" || mobileTab === "output" || mobileTab === "explanation" ? "hidden md:flex flex-col" : "flex flex-col"
             }`}
             style={{
               height: window.innerWidth >= 768 ? `${(1 - bottomPaneRatio) * 100}%` : "100%",
@@ -953,7 +1244,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
           {/* D. BOTTOM CONSOLE / RESULTS AREA */}
           <div
             className={`min-h-0 w-full bg-slate-950 flex flex-col ${
-              mobileTab === "output" ? "flex flex-1" : mobileTab === "problem" || mobileTab === "code" ? "hidden md:flex" : "hidden md:flex"
+              mobileTab === "output" || mobileTab === "explanation" ? "flex flex-1" : mobileTab === "problem" || mobileTab === "code" ? "hidden md:flex" : "hidden md:flex"
             }`}
             style={{
               height: window.innerWidth >= 768 ? `${bottomPaneRatio * 100}%` : "100%",
@@ -1004,10 +1295,53 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
                   <History className="w-3.5 h-3.5" />
                   <span>Nhật ký ({debugRuns.length})</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBottomTab("explanation")}
+                  className={`px-3 py-1.5 rounded-t-md font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    bottomTab === "explanation"
+                      ? "bg-slate-900 text-white border-t-2 border-amber-500"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <PenLine className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Tự giải thích</span>
+                  {reflection.errorEncountered && reflection.howFixed ? (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Đã có nội dung giải thích" />
+                  ) : (
+                    <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800/80 px-1 rounded-sm">
+                      Cần viết
+                    </span>
+                  )}
+                </button>
               </div>
 
               {/* Right controls for console */}
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBottomTab("explanation");
+                    setMobileTab("explanation");
+                  }}
+                  className="text-xs bg-amber-600 hover:bg-amber-500 text-white font-bold px-2.5 py-1 rounded-md cursor-pointer flex items-center gap-1.5 shadow-xs transition-colors"
+                  title="Mở biểu mẫu tự giải thích quá trình sửa lỗi"
+                >
+                  <PenLine className="w-3.5 h-3.5" />
+                  <span>Viết giải thích</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsExplanationModalOpen(true)}
+                  className="text-[11px] text-amber-300 hover:text-white px-2 py-1 rounded-md hover:bg-slate-800 cursor-pointer flex items-center gap-1 border border-amber-500/30"
+                  title="Phóng to biểu mẫu tự giải thích toàn màn hình"
+                >
+                  <Maximize2 className="w-3 h-3" />
+                  <span className="hidden sm:inline">Phóng to</span>
+                </button>
+
                 {consoleOutput && bottomTab === "output" && (
                   <button
                     type="button"
@@ -1088,7 +1422,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
                 </div>
               )}
 
-              {/* Tab 3: Debug History & Reflection */}
+              {/* Tab 3: Debug History */}
               {bottomTab === "diary" && (
                 <div className="h-full space-y-3 font-sans text-xs">
                   {debugRuns.length === 0 ? (
@@ -1142,6 +1476,25 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Tab 4: Self-Explanation Form */}
+              {bottomTab === "explanation" && (
+                <div className="h-full">
+                  <StudentSelfExplanationForm
+                    reflection={reflection}
+                    onChangeReflection={setReflection}
+                    debugRuns={debugRuns}
+                    serverSaveStatus={serverSaveStatus}
+                    lastSavedTime={lastSavedTime}
+                    saveErrorMessage={saveErrorMessage}
+                    onSaveManual={() => saveDraftToServer(true)}
+                    onSubmitAssignment={handleSubmitAssignment}
+                    canSubmit={Boolean(currentLesson && onSubmitWork)}
+                    isSubmitting={isSubmitting}
+                    isModal={false}
+                  />
                 </div>
               )}
             </div>
@@ -1474,6 +1827,30 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. SELF-EXPLANATION EXPANDED MODAL (For distraction-free full writing) */}
+      {isExplanationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs">
+          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <StudentSelfExplanationForm
+                reflection={reflection}
+                onChangeReflection={setReflection}
+                debugRuns={debugRuns}
+                serverSaveStatus={serverSaveStatus}
+                lastSavedTime={lastSavedTime}
+                saveErrorMessage={saveErrorMessage}
+                onSaveManual={() => saveDraftToServer(true)}
+                onSubmitAssignment={handleSubmitAssignment}
+                canSubmit={Boolean(currentLesson && onSubmitWork)}
+                isSubmitting={isSubmitting}
+                isModal={true}
+                onCloseModal={() => setIsExplanationModalOpen(false)}
+              />
             </div>
           </div>
         </div>

@@ -45,7 +45,8 @@ import {
   Cpu,
   Loader2,
   Users,
-  PenLine
+  PenLine,
+  Key
 } from "lucide-react";
 import { ExamCreationSystem } from "./ExamCreationSystem";
 import { StudentAccountManager } from "./StudentAccountManager";
@@ -65,6 +66,7 @@ interface TeacherDashboardProps {
   onDeleteLesson: (lessonId: string) => Promise<void>;
   onGradeSubmission: (submissionId: string, rubric: RubricCriteria, score: number, feedback: string) => Promise<void>;
   onAddClass?: (newClass: ClassItem) => Promise<void> | void;
+  onUpdateClass?: (classId: string, updates: Partial<ClassItem>) => Promise<void> | void;
   onDeleteClass?: (classId: string) => Promise<void> | void;
   onRestoreClass?: (classId: string) => Promise<void> | void;
   onSwitchToStudent?: () => void;
@@ -86,6 +88,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onDeleteLesson,
   onGradeSubmission,
   onAddClass,
+  onUpdateClass,
   onDeleteClass,
   onRestoreClass,
   onSwitchToStudent,
@@ -198,6 +201,124 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       alert("Lỗi khi khôi phục lớp: " + (err.message || err));
     } finally {
       setIsRestoringClassId(null);
+    }
+  };
+
+  // Class Invite Code states & handlers
+  const [copiedClassId, setCopiedClassId] = useState<string | null>(null);
+  const [rotatingClass, setRotatingClass] = useState<ClassItem | null>(null);
+  const [isRotating, setIsRotating] = useState<boolean>(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+  const [togglingClassId, setTogglingClassId] = useState<string | null>(null);
+  const [generatingClassId, setGeneratingClassId] = useState<string | null>(null);
+  const [classCodeToast, setClassCodeToast] = useState<string | null>(null);
+
+  const handleCopyClassCode = (cls: ClassItem) => {
+    if (!cls.inviteCode) return;
+    navigator.clipboard.writeText(cls.inviteCode);
+    setCopiedClassId(cls.id);
+    setClassCodeToast(`Đã sao chép mã "${cls.inviteCode}" của lớp ${cls.name}`);
+    setTimeout(() => {
+      setCopiedClassId(null);
+      setClassCodeToast(null);
+    }, 2500);
+  };
+
+  const handleGenerateClassCode = async (cls: ClassItem) => {
+    setGeneratingClassId(cls.id);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`/api/classes/${cls.id}/generate-code`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (data.success && data.inviteCode) {
+        if (onUpdateClass) {
+          await onUpdateClass(cls.id, { inviteCode: data.inviteCode, allowJoinByCode: true });
+        }
+        if (viewingClassDetail && viewingClassDetail.id === cls.id) {
+          setViewingClassDetail((prev) => prev ? { ...prev, inviteCode: data.inviteCode, allowJoinByCode: true } : null);
+        }
+        setClassCodeToast(`Đã tạo mã lớp thành công: ${data.inviteCode}`);
+        setTimeout(() => setClassCodeToast(null), 3000);
+      } else {
+        setClassCodeToast(data.error || "Không thể tạo mã lớp");
+        setTimeout(() => setClassCodeToast(null), 3500);
+      }
+    } catch (e: any) {
+      setClassCodeToast("Lỗi kết nối: " + e.message);
+      setTimeout(() => setClassCodeToast(null), 3500);
+    } finally {
+      setGeneratingClassId(null);
+    }
+  };
+
+  const handleConfirmRotateCode = async () => {
+    if (!rotatingClass) return;
+    setIsRotating(true);
+    setRotateError(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`/api/classes/${rotatingClass.id}/rotate-code`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (data.success && data.inviteCode) {
+        if (onUpdateClass) {
+          await onUpdateClass(rotatingClass.id, { inviteCode: data.inviteCode });
+        }
+        if (viewingClassDetail && viewingClassDetail.id === rotatingClass.id) {
+          setViewingClassDetail((prev) => prev ? { ...prev, inviteCode: data.inviteCode } : null);
+        }
+        setClassCodeToast(`Đã đổi mã lớp thành công: ${data.inviteCode}. Mã cũ đã hết hiệu lực.`);
+        setTimeout(() => setClassCodeToast(null), 4000);
+        setRotatingClass(null);
+      } else {
+        setRotateError(data.error || "Không thể đổi mã lớp");
+      }
+    } catch (e: any) {
+      setRotateError("Lỗi kết nối: " + e.message);
+    } finally {
+      setIsRotating(false);
+    }
+  };
+
+  const handleToggleJoinByCode = async (cls: ClassItem) => {
+    const nextVal = cls.allowJoinByCode === false ? true : false;
+    setTogglingClassId(cls.id);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`/api/classes/${cls.id}/toggle-join-by-code`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ allowJoinByCode: nextVal }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onUpdateClass) {
+          await onUpdateClass(cls.id, { allowJoinByCode: nextVal });
+        }
+        if (viewingClassDetail && viewingClassDetail.id === cls.id) {
+          setViewingClassDetail((prev) => prev ? { ...prev, allowJoinByCode: nextVal } : null);
+        }
+        setClassCodeToast(nextVal ? "Đã bật cho phép học sinh tham gia bằng mã" : "Đã khóa không cho học sinh mới tham gia bằng mã");
+        setTimeout(() => setClassCodeToast(null), 3000);
+      }
+    } catch (e) {
+      console.warn("Toggle join by code error:", e);
+    } finally {
+      setTogglingClassId(null);
     }
   };
 
@@ -1161,6 +1282,111 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       </div>
                     </div>
 
+                    {/* MÃ THAM GIA LỚP & CÔNG TẮC CHO PHÉP THAM GIA */}
+                    <div className="p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200/80 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
+                      <div className="flex items-start sm:items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+                          <Key className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-slate-700">Mã tham gia lớp:</span>
+                            {viewingClassDetail.inviteCode ? (
+                              <span className="font-mono text-base font-black text-blue-900 bg-white px-3 py-1 rounded-xl border border-blue-300 tracking-wider shadow-2xs">
+                                {viewingClassDetail.inviteCode}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-500 italic">Chưa có mã</span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              viewingClassDetail.allowJoinByCode !== false
+                                ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                                : "bg-slate-100 text-slate-500 border-slate-300"
+                            }`}>
+                              {viewingClassDetail.allowJoinByCode !== false ? "● Đang mở nhận học sinh" : "○ Đã khóa nhận học sinh"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            Cấp mã này cho học sinh để tự tham gia lớp từ trang Học sinh. Khi đổi mã, mã cũ hết hiệu lực và không ảnh hưởng học sinh cũ.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        {viewingClassDetail.inviteCode ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyClassCode(viewingClassDetail)}
+                              className="px-3 py-2 bg-white hover:bg-slate-50 text-blue-700 border border-blue-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                              title="Sao chép mã lớp vào bộ nhớ tạm"
+                            >
+                              {copiedClassId === viewingClassDetail.id ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="text-emerald-700">Đã sao chép</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Sao chép mã</span>
+                                </>
+                              )}
+                            </button>
+
+                            {currentUser?.role === "teacher" &&
+                              (!viewingClassDetail.ownerUid || viewingClassDetail.ownerUid === currentUser.uid) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRotatingClass(viewingClassDetail)}
+                                  className="px-3 py-2 bg-white hover:bg-amber-50 text-amber-700 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                                  title="Đổi mã lớp mới"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Đổi mã</span>
+                                </button>
+                              )}
+                          </>
+                        ) : (
+                          currentUser?.role === "teacher" &&
+                          (!viewingClassDetail.ownerUid || viewingClassDetail.ownerUid === currentUser.uid) && (
+                            <button
+                              type="button"
+                              disabled={generatingClassId === viewingClassDetail.id}
+                              onClick={() => handleGenerateClassCode(viewingClassDetail)}
+                              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                            >
+                              {generatingClassId === viewingClassDetail.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Key className="w-3.5 h-3.5" />
+                              )}
+                              <span>Tạo mã lớp</span>
+                            </button>
+                          )
+                        )}
+
+                        {currentUser?.role === "teacher" &&
+                          (!viewingClassDetail.ownerUid || viewingClassDetail.ownerUid === currentUser.uid) &&
+                          viewingClassDetail.inviteCode && (
+                            <button
+                              type="button"
+                              disabled={togglingClassId === viewingClassDetail.id}
+                              onClick={() => handleToggleJoinByCode(viewingClassDetail)}
+                              className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${
+                                viewingClassDetail.allowJoinByCode !== false
+                                  ? "bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50"
+                                  : "bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200"
+                              }`}
+                              title="Bật hoặc tắt cho phép học sinh tham gia bằng mã"
+                            >
+                              <span className={`w-2 h-2 rounded-full ${viewingClassDetail.allowJoinByCode !== false ? "bg-emerald-500" : "bg-slate-400"}`} />
+                              <span>{viewingClassDetail.allowJoinByCode !== false ? "Cho phép tham gia: BẬT" : "Cho phép tham gia: TẮT"}</span>
+                            </button>
+                          )}
+                      </div>
+                    </div>
+
                     {/* Students in this Class */}
                     <div>
                       <div className="flex items-center justify-between mb-3">
@@ -1376,6 +1602,101 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                   <p className="text-xs text-slate-500 mt-1 line-clamp-2">
                                     {cls.description || "Chưa có mô tả."}
                                   </p>
+                                </div>
+
+                                {/* Class Invite Code Box on Card */}
+                                <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-2.5 space-y-2 mt-2">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <div className="flex items-center gap-1.5 text-xs text-slate-700 font-semibold min-w-0">
+                                      <Key className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                      <span className="shrink-0">Mã:</span>
+                                      {cls.inviteCode ? (
+                                        <span className="font-mono font-black text-blue-900 bg-white px-2 py-0.5 rounded-md border border-blue-200 text-xs tracking-wider truncate shadow-2xs">
+                                          {cls.inviteCode}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[11px] text-slate-400 italic">Chưa có mã</span>
+                                      )}
+                                    </div>
+
+                                    {cls.inviteCode ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleCopyClassCode(cls);
+                                        }}
+                                        className="px-2 py-1 rounded-lg text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs shrink-0"
+                                        title="Sao chép mã"
+                                      >
+                                        {copiedClassId === cls.id ? (
+                                          <>
+                                            <Check className="w-3 h-3 text-emerald-600" />
+                                            <span className="text-emerald-700">Đã chép</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="w-3 h-3" />
+                                            <span>Chép</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    ) : (
+                                      isOwner && (
+                                        <button
+                                          type="button"
+                                          disabled={generatingClassId === cls.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleGenerateClassCode(cls);
+                                          }}
+                                          className="px-2 py-1 rounded-lg text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 flex items-center gap-1 cursor-pointer shrink-0"
+                                        >
+                                          {generatingClassId === cls.id ? (
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                          ) : (
+                                            <Key className="w-3 h-3" />
+                                          )}
+                                          <span>Tạo mã</span>
+                                        </button>
+                                      )
+                                    )}
+                                  </div>
+
+                                  {isOwner && cls.inviteCode && (
+                                    <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60 text-[11px]">
+                                      <button
+                                        type="button"
+                                        disabled={togglingClassId === cls.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleToggleJoinByCode(cls);
+                                        }}
+                                        className={`flex items-center gap-1 font-semibold cursor-pointer transition-colors ${
+                                          cls.allowJoinByCode !== false
+                                            ? "text-emerald-700 hover:text-emerald-800"
+                                            : "text-slate-400 hover:text-slate-600"
+                                        }`}
+                                        title="Bấm để bật hoặc tắt cho phép học sinh tham gia bằng mã"
+                                      >
+                                        <span className={`w-1.5 h-1.5 rounded-full ${cls.allowJoinByCode !== false ? "bg-emerald-500" : "bg-slate-400"}`} />
+                                        <span>{cls.allowJoinByCode !== false ? "Nhận mã: BẬT" : "Nhận mã: TẮT"}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setRotatingClass(cls);
+                                        }}
+                                        className="text-amber-700 hover:text-amber-800 font-semibold flex items-center gap-0.5 cursor-pointer transition-colors"
+                                        title="Đổi mã lớp mới"
+                                      >
+                                        <RefreshCw className="w-2.5 h-2.5" />
+                                        <span>Đổi mã</span>
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
@@ -2680,6 +3001,85 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MODAL: XÁC NHẬN ĐỔI MÃ LỚP */}
+      {rotatingClass && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <RefreshCw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xác nhận đổi mã tham gia lớp</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Lớp: <strong className="text-slate-800">{rotatingClass.name}</strong></p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 text-xs text-amber-900 space-y-2">
+              <p className="font-bold">⚠️ Lưu ý quy tắc an toàn:</p>
+              <ul className="list-disc pl-4 space-y-1.5 text-[11px] text-amber-900/90 leading-relaxed">
+                <li>Mã cũ <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-300">{rotatingClass.inviteCode}</strong> sẽ hết hiệu lực ngay lập tức.</li>
+                <li>Học sinh hiện có trong lớp <strong className="text-emerald-700">KHÔNG bị ảnh hưởng</strong> và vẫn giữ đầy đủ bài nộp, điểm số.</li>
+                <li>Chỉ báo thành công sau khi đã lưu lên máy chủ hoàn tất.</li>
+              </ul>
+            </div>
+
+            {rotateError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+                {rotateError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isRotating}
+                onClick={() => {
+                  setRotatingClass(null);
+                  setRotateError(null);
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isRotating}
+                onClick={handleConfirmRotateCode}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {isRotating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang đổi mã...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Xác nhận đổi mã</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Toast Notification for Class Code actions */}
+      {classCodeToast && (
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 text-xs font-semibold animate-slide-up border border-slate-800 max-w-sm">
+          <Key className="w-4 h-4 text-blue-400 shrink-0" />
+          <span className="flex-1">{classCodeToast}</span>
+          <button
+            type="button"
+            onClick={() => setClassCodeToast(null)}
+            className="text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
     </div>

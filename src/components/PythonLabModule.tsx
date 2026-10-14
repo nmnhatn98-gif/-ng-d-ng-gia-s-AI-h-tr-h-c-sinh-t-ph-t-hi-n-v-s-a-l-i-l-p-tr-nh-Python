@@ -289,6 +289,11 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   // Submit status
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitSuccessMsg, setSubmitSuccessMsg] = useState<string | null>(null);
+  const [submitErrorMsg, setSubmitErrorMsg] = useState<string | null>(null);
+  const [missingExplanationNotice, setMissingExplanationNotice] = useState<string[] | null>(null);
+  const [codeCopiedNotice, setCodeCopiedNotice] = useState<boolean>(false);
+  const [cheatsheetCopiedIdx, setCheatsheetCopiedIdx] = useState<number | null>(null);
+  const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
 
   // Check if current lesson already has submission
   const existingSubmission = currentLesson
@@ -628,14 +633,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
       if (missingFields.length > 0) {
         // Keep code and draft intact & persist to server
         handleSaveDraft();
-
-        alert(
-          `⚠️ Bài tập "${currentLesson.title}" yêu cầu học sinh tự giải thích khi nộp bài.\n\n` +
-          `Mã nguồn và bản nháp của em đã được giữ nguyên và lưu an toàn.\n\n` +
-          `Vui lòng hoàn thành các mục còn thiếu trong biểu mẫu Tự giải thích:\n` +
-          missingFields.map((f) => ` • ${f}`).join("\n")
-        );
-
+        setMissingExplanationNotice(missingFields);
         setBottomTab("explanation");
         setMobileTab("explanation");
         setIsExplanationModalOpen(true);
@@ -643,10 +641,8 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
       }
     }
 
-    if (!confirm(`Bạn có chắc chắn muốn nộp bài làm cho bài "${currentLesson.title}" kèm phần Tự giải thích không?`)) {
-      return;
-    }
-
+    setSubmitErrorMsg(null);
+    setMissingExplanationNotice(null);
     setIsSubmitting(true);
     try {
       // Auto-save draft first

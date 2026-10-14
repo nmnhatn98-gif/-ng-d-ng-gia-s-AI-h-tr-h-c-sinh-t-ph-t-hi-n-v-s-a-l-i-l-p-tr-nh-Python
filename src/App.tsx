@@ -207,15 +207,14 @@ export function App() {
     showToast("Đã đăng xuất tài khoản. Bạn đã quay lại trang Đăng ký / Đăng nhập.");
   };
 
-  // Sync data from Server Disk & Firestore on mount
-  useEffect(() => {
-    const loadPersistentData = async () => {
-      // 1. Đồng bộ tài khoản học sinh hai chiều (Server Disk + Firestore + LocalStorage)
-      try {
-        await syncStudentsWithCloud();
-      } catch (err) {
-        console.warn("Student multi-layer sync notice:", err);
-      }
+  // Sync data from Server Disk & Firestore
+  const loadPersistentData = async () => {
+    // 1. Đồng bộ tài khoản học sinh hai chiều (Server Disk + Firestore + LocalStorage)
+    try {
+      await syncStudentsWithCloud();
+    } catch (err) {
+      console.warn("Student multi-layer sync notice:", err);
+    }
 
       // 2. Đồng bộ bài nộp của học sinh từ Server Disk
       try {
@@ -324,8 +323,10 @@ export function App() {
       } catch (err) {
         console.warn("Firestore sync fallback:", err);
       }
-    };
+    }
+  };
 
+  useEffect(() => {
     loadPersistentData();
 
     // Listen to Auth State Changes
@@ -650,6 +651,26 @@ export function App() {
       console.error("handleAddClass failed:", err);
       throw err;
     }
+  };
+
+  // Update Class Handler (e.g. inviteCode, allowJoinByCode)
+  const handleUpdateClass = async (classId: string, updates: Partial<ClassItem>) => {
+    setClasses((prev) => {
+      const updated = prev.map((c) => (c.id === classId ? { ...c, ...updates } : c));
+      try {
+        localStorage.setItem("lms_classes", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  // Update Current Student User Profile Handler (e.g. after joining a class)
+  const handleUpdateCurrentUser = (updatedUser: UserProfile) => {
+    setCurrentUser(updatedUser);
+    try {
+      localStorage.setItem("lms_current_user", JSON.stringify(updatedUser));
+    } catch (e) {}
+    showToast(`🎉 Em đã gia nhập lớp ${updatedUser.classGrade || ""} thành công!`);
   };
 
   // Delete Class Handler: Soft Delete with server confirmation
@@ -1069,10 +1090,13 @@ export function App() {
             lessons={lessons}
             submissions={submissions}
             currentUser={activeUser}
+            classes={classes}
             selectedLevel={selectedLevel}
             onSelectLesson={(lesson) => setSelectedLesson(lesson)}
             onOpenHtmlLab={() => setActiveTab("html-lab")}
             onOpenPythonLab={() => setActiveTab("python-lab")}
+            onUpdateCurrentUser={handleUpdateCurrentUser}
+            onRefreshData={loadPersistentData}
           />
         )}
 
@@ -1153,6 +1177,7 @@ export function App() {
               onDeleteLesson={handleDeleteLesson}
               onGradeSubmission={handleGradeSubmission}
               onAddClass={handleAddClass}
+              onUpdateClass={handleUpdateClass}
               onDeleteClass={handleDeleteClass}
               onRestoreClass={handleRestoreClass}
               onSwitchToStudent={() => setActiveTab("lessons")}

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Lesson, Submission, UserProfile, GradeLevel } from "../types";
+import { Lesson, Submission, UserProfile, GradeLevel, ClassItem } from "../types";
 import { 
   Code2, 
   FileCode, 
@@ -13,21 +13,31 @@ import {
   Calendar,
   AlertCircle,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  School,
+  Key,
+  Users,
+  Check,
+  Loader2,
+  X
 } from "lucide-react";
 import { 
   extractGradeNumber, 
   getCurriculumTopicsForGrade 
 } from "../data/curriculumData";
+import { auth } from "../firebase";
 
 interface StudentDashboardProps {
   lessons: Lesson[];
   submissions: Submission[];
   currentUser: UserProfile;
+  classes?: ClassItem[];
   selectedLevel?: GradeLevel | "all";
   onSelectLesson: (lesson: Lesson) => void;
   onOpenHtmlLab?: () => void;
   onOpenPythonLab?: () => void;
+  onUpdateCurrentUser?: (updatedUser: UserProfile) => void;
+  onRefreshData?: () => Promise<void> | void;
   isLoading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -37,9 +47,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   lessons,
   submissions,
   currentUser,
+  classes = [],
+  selectedLevel,
   onSelectLesson,
   onOpenHtmlLab,
   onOpenPythonLab,
+  onUpdateCurrentUser,
+  onRefreshData,
   isLoading = false,
   error = null,
   onRetry,
@@ -53,6 +67,98 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   // Thu gọn / mở rộng học liệu tham khảo
   const [isCurriculumExpanded, setIsCurriculumExpanded] = useState(false);
+
+  // Join Class states
+  const [isJoinClassModalOpen, setIsJoinClassModalOpen] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [joinStep, setJoinStep] = useState<"input" | "confirm" | "success">("input");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [verifiedClass, setVerifiedClass] = useState<any | null>(null);
+  const [joinSuccessMsg, setJoinSuccessMsg] = useState<string | null>(null);
+
+  // Lớp học hiện tại của học sinh
+  const studentClass = classes.find(
+    (c) => c.status !== "deleted" && (c.id === currentUser.classId || c.name === currentUser.classGrade)
+  );
+
+  const handleOpenJoinModal = () => {
+    setJoinCodeInput("");
+    setJoinStep("input");
+    setJoinError(null);
+    setVerifiedClass(null);
+    setJoinSuccessMsg(null);
+    setIsJoinClassModalOpen(true);
+  };
+
+  const handleVerifyJoinCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = joinCodeInput.trim().toUpperCase();
+    if (!clean) {
+      setJoinError("Vui lòng nhập mã lớp học gồm 6 - 8 ký tự do thầy/cô cấp.");
+      return;
+    }
+    setIsVerifying(true);
+    setJoinError(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/classes/verify-join-code", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ code: clean }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.class) {
+        setVerifiedClass(data.class);
+        setJoinStep("confirm");
+      } else {
+        setJoinError(data.error || "Mã lớp không hợp lệ hoặc không còn sử dụng được.");
+      }
+    } catch (err: any) {
+      setJoinError("Lỗi kết nối máy chủ. Vui lòng kiểm tra lại mạng Internet.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleConfirmJoinClass = async () => {
+    const clean = joinCodeInput.trim().toUpperCase();
+    if (!clean) return;
+    setIsJoining(true);
+    setJoinError(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/classes/confirm-join", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ code: clean }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setJoinSuccessMsg(data.message || `🎉 Em đã tham gia thành công lớp ${data.class?.name || ""}!`);
+        setJoinStep("success");
+        if (data.student && onUpdateCurrentUser) {
+          onUpdateCurrentUser(data.student);
+        }
+        if (onRefreshData) {
+          await onRefreshData();
+        }
+      } else {
+        setJoinError(data.error || "Không thể tham gia lớp học. Vui lòng thử lại.");
+      }
+    } catch (err: any) {
+      setJoinError("Lỗi lưu trữ dữ liệu lớp: " + (err.message || "Kiểm tra mạng"));
+    } finally {
+      setIsJoining(false);
+    }
+  };
 
   // 1. Phân loại bài nộp của học sinh
   const mySubmissions = submissions.filter((s) => {
@@ -168,8 +274,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {/* 1. Header: Chào tài khoản & Lớp học */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* 1. Header: Chào tài khoản & Thẻ Lớp học của tôi */}
+      <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200/60 text-blue-700 text-xs font-semibold flex items-center gap-1.5">
@@ -183,9 +289,62 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             Chào {currentUser.displayName || "em"}!
           </h1>
           <p className="text-sm text-slate-600 mt-0.5">
-            {currentUser.classGrade || `Khối ${studentRegisteredGrade}`}
+            Mã học sinh: <strong className="font-mono text-slate-800">{currentUser.studentCode || currentUser.uid}</strong>
             {currentUser.school ? ` · ${currentUser.school}` : ""}
           </p>
+        </div>
+
+        {/* LỚP HỌC CỦA TÔI / NÚT THAM GIA LỚP */}
+        <div className="flex items-center gap-3">
+          {studentClass || (currentUser.classGrade && currentUser.classGrade !== "Khách Trải Nghiệm") ? (
+            <div className="bg-white border border-blue-200/90 rounded-2xl p-3 sm:p-3.5 shadow-2xs flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
+                <School className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lớp của em:</span>
+                  <span className="px-2 py-0.5 rounded-md bg-blue-600 text-white font-bold text-xs">
+                    {studentClass?.name || currentUser.classGrade}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {studentClass?.teacherName ? `GV: ${studentClass.teacherName}` : `Khối ${studentRegisteredGrade}`}
+                  {studentClass?.schoolYear ? ` · ${studentClass.schoolYear}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenJoinModal}
+                className="ml-1 sm:ml-2 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 hover:border-blue-400 text-slate-600 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                title="Tham gia thêm lớp hoặc đổi lớp bằng mã"
+              >
+                <Key className="w-3.5 h-3.5 text-blue-500" />
+                <span className="hidden sm:inline">Đổi mã lớp</span>
+                <span className="sm:hidden">Đổi mã</span>
+              </button>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-3 sm:p-3.5 shadow-2xs flex items-center justify-between gap-3 w-full sm:w-auto">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold shrink-0">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-amber-900">Em chưa vào lớp học nào</div>
+                  <p className="text-[11px] text-amber-700 mt-0.5">Nhập mã do thầy cô cấp để nhận bài tập chính khóa</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenJoinModal}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0"
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>Tham gia lớp ngay</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -643,6 +802,183 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
         )}
       </section>
+
+      {/* MODAL: THAM GIA LỚP BẰNG MÃ */}
+      {isJoinClassModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Tham gia lớp học</h3>
+                  <p className="text-xs text-slate-500">Nhập mã tham gia do giáo viên bộ môn cấp</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsJoinClassModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Error Message */}
+            {joinError && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{joinError}</span>
+              </div>
+            )}
+
+            {/* STEP 1: INPUT CODE */}
+            {joinStep === "input" && (
+              <form onSubmit={handleVerifyJoinCode} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Mã lớp học (6 - 8 ký tự):
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    maxLength={12}
+                    value={joinCodeInput}
+                    onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                    placeholder="VD: PY10A1"
+                    className="w-full px-4 py-3 text-center font-mono text-lg font-black tracking-widest bg-slate-50 border-2 border-slate-200 focus:border-blue-600 rounded-2xl uppercase focus:outline-none focus:bg-white transition-all"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1.5 text-center">
+                    Mã lớp không phân biệt chữ hoa hay chữ thường.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsJoinClassModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isVerifying || !joinCodeInput.trim()}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isVerifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Đang kiểm tra mã...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Tiếp tục</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* STEP 2: CONFIRM CLASS INFORMATION */}
+            {joinStep === "confirm" && verifiedClass && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200/90 space-y-2.5">
+                  <div className="text-xs font-bold text-blue-900 uppercase tracking-wide">
+                    Thông tin lớp học tìm thấy:
+                  </div>
+
+                  <div className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <School className="w-5 h-5 text-blue-600 shrink-0" />
+                    <span>{verifiedClass.name}</span>
+                  </div>
+
+                  <div className="text-xs text-slate-700 space-y-1 pt-1 border-t border-blue-200/60">
+                    {verifiedClass.teacherName && (
+                      <p>• <strong>Giáo viên phụ trách:</strong> {verifiedClass.teacherName}</p>
+                    )}
+                    {verifiedClass.gradeNumber && (
+                      <p>• <strong>Khối lớp:</strong> Khối {verifiedClass.gradeNumber}</p>
+                    )}
+                    {verifiedClass.schoolYear && (
+                      <p>• <strong>Năm học:</strong> {verifiedClass.schoolYear}</p>
+                    )}
+                    {verifiedClass.description && (
+                      <p className="text-[11px] text-slate-500 italic mt-1">{verifiedClass.description}</p>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Em có xác nhận tham gia vào lớp học này để bắt đầu nhận bài tập và nộp bài làm không?
+                </p>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={isJoining}
+                    onClick={() => {
+                      setJoinStep("input");
+                      setJoinError(null);
+                    }}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Nhập mã khác
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isJoining}
+                    onClick={handleConfirmJoinClass}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isJoining ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Đang lưu lớp học...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Xác nhận tham gia</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: SUCCESS CELEBRATION */}
+            {joinStep === "success" && (
+              <div className="text-center py-4 space-y-4 animate-fade-in">
+                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-900">
+                    {joinSuccessMsg || "Đã tham gia lớp thành công!"}
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Danh sách bài tập và tiến trình học tập của lớp đã sẵn sàng cho em.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsJoinClassModalOpen(false)}
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                >
+                  Vào học ngay →
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

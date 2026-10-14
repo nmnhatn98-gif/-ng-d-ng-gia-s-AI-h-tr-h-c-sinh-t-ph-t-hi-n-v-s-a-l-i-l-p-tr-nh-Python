@@ -620,11 +620,66 @@ function generateInitialPassword(): string {
   return res;
 }
 
+// Rate limiting & secure class code generator
+interface CodeAttemptTracker {
+  count: number;
+  firstAttempt: number;
+  blockedUntil?: number;
+}
+const joinCodeAttempts = new Map<string, CodeAttemptTracker>();
+
+function checkJoinRateLimit(key: string): { allowed: boolean; remainingSeconds?: number } {
+  const now = Date.now();
+  const attempt = joinCodeAttempts.get(key);
+  if (!attempt) return { allowed: true };
+
+  if (attempt.blockedUntil && attempt.blockedUntil > now) {
+    const remainingSeconds = Math.ceil((attempt.blockedUntil - now) / 1000);
+    return { allowed: false, remainingSeconds };
+  }
+
+  // 5 minutes window (300,000 ms)
+  if (now - attempt.firstAttempt > 300000) {
+    joinCodeAttempts.delete(key);
+    return { allowed: true };
+  }
+
+  return { allowed: true };
+}
+
+function recordFailedJoinAttempt(key: string) {
+  const now = Date.now();
+  const attempt = joinCodeAttempts.get(key) || { count: 0, firstAttempt: now };
+  attempt.count += 1;
+  if (attempt.count >= 5) {
+    attempt.blockedUntil = now + 300000; // Block for 5 minutes
+  }
+  joinCodeAttempts.set(key, attempt);
+}
+
+function resetJoinAttempts(key: string) {
+  joinCodeAttempts.delete(key);
+}
+
+// Generate secure random alphanumeric 6-character class code (without ambiguous 0/O/1/I)
+function generateSecureClassCode(existingCodes?: Set<string>): string {
+  const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+  const used = existingCodes || new Set<string>();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    let code = "";
+    for (let i = 0; i < 6; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+    if (!used.has(code)) {
+      return code;
+    }
+  }
+  return `C${Date.now().toString(36).slice(-5).toUpperCase()}`;
+}
+
+// Backward-compatible alias for existing callers
 function generateClassInviteCode(className: string): string {
-  const cleaned = className.toUpperCase().replace(/LỚP|LOP|\s+/g, "").replace(/[^A-Z0-9]/g, "");
-  const prefix = cleaned.slice(0, 4) || "CLS";
-  const suffix = Math.floor(100 + Math.random() * 900);
-  return `${prefix}${suffix}`;
+  return generateSecureClassCode();
 }
 
 // Verify class invite code publicly (no auth required for students entering code)
@@ -990,7 +1045,10 @@ app.get("/api/classes", async (req, res) => {
         : enrichedClasses.filter((c) => c.status !== "deleted");
       return res.json({ success: true, classes: result, total: result.length });
     } else {
-      const active = enrichedClasses.filter((c) => c.status !== "deleted");
+      // Students should NOT see inviteCodes or removedStudents of all classes (Requirement 1 & 4)
+      const active = enrichedClasses
+        .filter((c) => c.status !== "deleted")
+        .map(({ inviteCode, removedStudents, ...rest }) => rest);
       return res.json({ success: true, classes: active, total: active.length });
     }
   } catch (err: any) {
@@ -1036,6 +1094,9 @@ app.post("/api/classes", async (req, res) => {
         ? body.id
         : `cls-${body.gradeLevel || "gen"}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
+    const existingCodes = new Set<string>(
+      currentClasses.map((c) => String(c.inviteCode || "").toUpperCase()).filter(Boolean)
+    );
     const newClass = {
       id: classId,
       name: cleanName,
@@ -1050,7 +1111,9 @@ app.post("/api/classes", async (req, res) => {
       room: (body.room || "").trim(),
       description: (body.description || "").trim(),
       status: "active",
-      inviteCode: body.inviteCode || generateClassInviteCode(cleanName),
+      inviteCode: body.inviteCode || generateSecureClassCode(existingCodes),
+      allowJoinByCode: true,
+      removedStudents: [],
       createdAt: new Date().toISOString(),
     };
 
@@ -1155,6 +1218,489 @@ app.post("/api/classes/:classId/restore", async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi khôi phục lớp học: " + err.message });
+  }
+});
+
+// 4a. Regenerate class invite code (Teacher only, invalidates old code without affecting existing students)
+app.post("/api/classes/:classId/regenerate-code", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const cls = currentClasses.find((c) => c.id === classId);
+    if (!cls) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học." });
+    }
+
+    const isOwner =
+      cls.ownerUid === authTeacher.uid ||
+      !cls.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối: Bạn chỉ có thể đổi mã cho lớp do bạn quản lý." });
+    }
+
+    const existingCodes = new Set<string>(
+      currentClasses.map((c) => String(c.inviteCode || "").toUpperCase()).filter(Boolean)
+    );
+    const newCode = generateSecureClassCode(existingCodes);
+
+    cls.inviteCode = newCode;
+    cls.updatedAt = new Date().toISOString();
+
+    const saveOk = writeJsonData("classes.json", currentClasses);
+    if (!saveOk) {
+      return res.status(500).json({ error: "Không thể lưu mã mới lên đĩa máy chủ." });
+    }
+
+    if (fbDb) {
+      try {
+        await fbSetDoc(fbDoc(fbDb, "classes", classId), {
+          inviteCode: newCode,
+          updatedAt: cls.updatedAt,
+        }, { merge: true });
+      } catch (e) {
+        console.warn("Firestore sync new code notice:", e);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Đã đổi mã tham gia lớp thành công. Mã cũ đã hết hiệu lực, học sinh hiện có trong lớp không bị ảnh hưởng.",
+      inviteCode: newCode,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi đổi mã lớp: " + err.message });
+  }
+});
+
+// 4b. Toggle allow join by code (Teacher only)
+app.post("/api/classes/:classId/toggle-join-code", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const { allowJoinByCode } = req.body || {};
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const cls = currentClasses.find((c) => c.id === classId);
+    if (!cls) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học." });
+    }
+
+    const isOwner =
+      cls.ownerUid === authTeacher.uid ||
+      !cls.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối." });
+    }
+
+    cls.allowJoinByCode = Boolean(allowJoinByCode);
+    cls.updatedAt = new Date().toISOString();
+
+    const saveOk = writeJsonData("classes.json", currentClasses);
+    if (!saveOk) {
+      return res.status(500).json({ error: "Không thể lưu trạng thái lên máy chủ." });
+    }
+
+    if (fbDb) {
+      try {
+        await fbSetDoc(fbDoc(fbDb, "classes", classId), {
+          allowJoinByCode: cls.allowJoinByCode,
+          updatedAt: cls.updatedAt,
+        }, { merge: true });
+      } catch (e) {}
+    }
+
+    res.json({
+      success: true,
+      allowJoinByCode: cls.allowJoinByCode,
+      message: cls.allowJoinByCode
+        ? "Đã bật cho phép học sinh tham gia bằng mã."
+        : "Đã khóa không cho học sinh mới tham gia bằng mã.",
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi cập nhật trạng thái tham gia: " + err.message });
+  }
+});
+
+// 4c. Generate code for existing class if not already has one
+app.post("/api/classes/:classId/generate-code", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const cls = currentClasses.find((c) => c.id === classId);
+    if (!cls) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học." });
+    }
+
+    const isOwner =
+      cls.ownerUid === authTeacher.uid ||
+      !cls.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối." });
+    }
+
+    if (cls.inviteCode) {
+      return res.json({ success: true, inviteCode: cls.inviteCode });
+    }
+
+    const existingCodes = new Set<string>(
+      currentClasses.map((c) => String(c.inviteCode || "").toUpperCase()).filter(Boolean)
+    );
+    const newCode = generateSecureClassCode(existingCodes);
+    cls.inviteCode = newCode;
+    cls.allowJoinByCode = cls.allowJoinByCode !== false;
+    cls.updatedAt = new Date().toISOString();
+
+    writeJsonData("classes.json", currentClasses);
+
+    if (fbDb) {
+      try {
+        await fbSetDoc(fbDoc(fbDb, "classes", classId), {
+          inviteCode: newCode,
+          allowJoinByCode: cls.allowJoinByCode,
+          updatedAt: cls.updatedAt,
+        }, { merge: true });
+      } catch (e) {}
+    }
+
+    res.json({ success: true, inviteCode: newCode });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tạo mã lớp: " + err.message });
+  }
+});
+
+// 4d. Student Verify Join Code (Rate-limited, requires authentication, returns minimal confirmation data)
+app.post("/api/classes/verify-join-code", async (req, res) => {
+  try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
+    const rateKey = authUser.uid;
+    const rateCheck = checkJoinRateLimit(rateKey);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: `Bạn đã thử nhập mã sai quá nhiều lần. Vui lòng đợi ${rateCheck.remainingSeconds} giây trước khi thử lại để bảo mật hệ thống.`,
+      });
+    }
+
+    const { code } = req.body || {};
+    const cleanCode = String(code || "").trim().toUpperCase();
+    if (!cleanCode) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập mã tham gia lớp học." });
+    }
+
+    // Must NOT accept classId or className as code (Requirement 4)
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const students = readJsonData<any[]>("students.json", []);
+    const currentStudent = students.find((s) => s.uid === authUser.uid);
+
+    const matched = currentClasses.find(
+      (c) => c.inviteCode && String(c.inviteCode).trim().toUpperCase() === cleanCode
+    );
+
+    if (!matched) {
+      recordFailedJoinAttempt(rateKey);
+      return res.status(404).json({
+        success: false,
+        error: "Mã lớp không hợp lệ hoặc không còn sử dụng được. Vui lòng kiểm tra lại với giáo viên.",
+      });
+    }
+
+    if (matched.status === "deleted") {
+      recordFailedJoinAttempt(rateKey);
+      return res.status(400).json({
+        success: false,
+        error: "Lớp học này đã đóng hoặc chuyển vào thùng rác, không nhận thêm học sinh.",
+      });
+    }
+
+    if (matched.allowJoinByCode === false) {
+      return res.status(400).json({
+        success: false,
+        error: "Lớp học đã tắt tính năng tham gia bằng mã.",
+      });
+    }
+
+    if (Array.isArray(matched.removedStudents) && matched.removedStudents.includes(authUser.uid)) {
+      return res.status(403).json({
+        success: false,
+        error: "Bạn đã từng bị gỡ khỏi lớp học này. Vui lòng liên hệ trực tiếp giáo viên bộ môn để được thêm lại.",
+      });
+    }
+
+    const isAlreadyJoined =
+      currentStudent?.classId === matched.id ||
+      (currentStudent?.classGrade && currentStudent.classGrade === matched.name);
+
+    if (isAlreadyJoined) {
+      return res.status(400).json({
+        success: false,
+        alreadyJoined: true,
+        error: `Em đã là thành viên của lớp "${matched.name}" rồi.`,
+      });
+    }
+
+    resetJoinAttempts(rateKey);
+
+    // Return minimum confirmation information, DO NOT leak other students
+    return res.json({
+      success: true,
+      class: {
+        id: matched.id,
+        name: matched.name,
+        teacherName: matched.teacherName,
+        gradeLevel: matched.gradeLevel,
+        gradeNumber: matched.gradeNumber,
+        schoolYear: matched.schoolYear,
+        description: matched.description || "",
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: "Lỗi kiểm tra mã lớp: " + err.message });
+  }
+});
+
+// 4e. Student Confirm Join Class (Idempotent, persists membership, updates student profile & class count)
+app.post("/api/classes/confirm-join", async (req, res) => {
+  try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
+    const rateKey = authUser.uid;
+    const rateCheck = checkJoinRateLimit(rateKey);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: `Vui lòng đợi ${rateCheck.remainingSeconds} giây trước khi thao tác tiếp.`,
+      });
+    }
+
+    const { code } = req.body || {};
+    const cleanCode = String(code || "").trim().toUpperCase();
+    if (!cleanCode) {
+      return res.status(400).json({ success: false, error: "Thiếu mã tham gia lớp học." });
+    }
+
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const students = readJsonData<any[]>("students.json", []);
+    const vault = readJsonData<any[]>("students_vault.json", []);
+
+    const matched = currentClasses.find(
+      (c) => c.inviteCode && String(c.inviteCode).trim().toUpperCase() === cleanCode
+    );
+
+    if (!matched) {
+      recordFailedJoinAttempt(rateKey);
+      return res.status(404).json({
+        success: false,
+        error: "Mã lớp không hợp lệ hoặc không còn sử dụng được.",
+      });
+    }
+
+    if (matched.status === "deleted") {
+      return res.status(400).json({
+        success: false,
+        error: "Lớp học này đã đóng, không thể tham gia.",
+      });
+    }
+
+    if (matched.allowJoinByCode === false) {
+      return res.status(400).json({
+        success: false,
+        error: "Lớp học đã tắt tính năng tham gia bằng mã.",
+      });
+    }
+
+    if (Array.isArray(matched.removedStudents) && matched.removedStudents.includes(authUser.uid)) {
+      return res.status(403).json({
+        success: false,
+        error: "Bạn đã từng bị gỡ khỏi lớp học này. Vui lòng liên hệ giáo viên để được thêm lại.",
+      });
+    }
+
+    let studentIndex = students.findIndex((s) => s.uid === authUser.uid);
+    let studentObj = studentIndex >= 0 ? students[studentIndex] : null;
+
+    if (!studentObj) {
+      const vaultIdx = vault.findIndex((s) => s.uid === authUser.uid);
+      if (vaultIdx >= 0) {
+        studentObj = { ...vault[vaultIdx] };
+        students.push(studentObj);
+        studentIndex = students.length - 1;
+      } else {
+        studentObj = {
+          uid: authUser.uid,
+          email: authUser.email,
+          displayName: authUser.displayName || authUser.email?.split("@")[0] || "Học sinh",
+          role: "student",
+          studentCode: authUser.studentCode || `HS-${Date.now().toString(36).slice(-4).toUpperCase()}`,
+          gradeLevel: matched.gradeLevel || "middle",
+          classGrade: matched.name,
+          classId: matched.id,
+          school: matched.teacherName ? `Lớp ${matched.teacherName}` : "Trường học",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        students.push(studentObj);
+        studentIndex = students.length - 1;
+      }
+    }
+
+    studentObj.classId = matched.id;
+    studentObj.classGrade = matched.name;
+    studentObj.gradeLevel = matched.gradeLevel || studentObj.gradeLevel;
+    if (matched.teacherName) {
+      studentObj.school = `Lớp ${matched.teacherName}`;
+    }
+    studentObj.updatedAt = new Date().toISOString();
+
+    students[studentIndex] = studentObj;
+    writeJsonData("students.json", students);
+
+    const vaultIdx = vault.findIndex((s) => s.uid === authUser.uid);
+    if (vaultIdx >= 0) {
+      vault[vaultIdx].classId = matched.id;
+      vault[vaultIdx].classGrade = matched.name;
+      vault[vaultIdx].updatedAt = new Date().toISOString();
+      writeJsonData("students_vault.json", vault);
+    }
+
+    if (fbDb) {
+      try {
+        await fbSetDoc(fbDoc(fbDb, "users", authUser.uid), {
+          classId: matched.id,
+          classGrade: matched.name,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      } catch (e) {
+        console.warn("Firestore user sync on join:", e);
+      }
+    }
+
+    // Recalculate student count for this class
+    const enrolledStudents = students.filter(
+      (st) => st.classId === matched.id || (!st.classId && st.classGrade === matched.name)
+    );
+    matched.studentCount = enrolledStudents.length;
+
+    const classIdx = currentClasses.findIndex((c) => c.id === matched.id);
+    if (classIdx >= 0) {
+      currentClasses[classIdx] = matched;
+      writeJsonData("classes.json", currentClasses);
+
+      if (fbDb) {
+        try {
+          await fbSetDoc(fbDoc(fbDb, "classes", matched.id), {
+            studentCount: matched.studentCount,
+          }, { merge: true });
+        } catch (e) {}
+      }
+    }
+
+    resetJoinAttempts(rateKey);
+
+    return res.json({
+      success: true,
+      message: `🎉 Em đã tham gia thành công lớp ${matched.name}!`,
+      class: {
+        id: matched.id,
+        name: matched.name,
+        teacherName: matched.teacherName,
+        gradeLevel: matched.gradeLevel,
+        schoolYear: matched.schoolYear,
+        studentCount: matched.studentCount,
+      },
+      student: sanitizeStudent(studentObj),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: "Lỗi tham gia lớp học: " + err.message });
+  }
+});
+
+// 4f. Remove student from class (Teacher only, adds to removedStudents to prevent unauthorized rejoin)
+app.post("/api/classes/:classId/remove-student", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const { studentId } = req.body || {};
+    if (!studentId) {
+      return res.status(400).json({ error: "Vui lòng chỉ định studentId cần gỡ khỏi lớp." });
+    }
+
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const cls = currentClasses.find((c) => c.id === classId);
+    if (!cls) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học." });
+    }
+
+    const isOwner =
+      cls.ownerUid === authTeacher.uid ||
+      !cls.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối: Bạn chỉ có thể quản lý học sinh trong lớp của mình." });
+    }
+
+    if (!Array.isArray(cls.removedStudents)) {
+      cls.removedStudents = [];
+    }
+    if (!cls.removedStudents.includes(studentId)) {
+      cls.removedStudents.push(studentId);
+    }
+
+    const students = readJsonData<any[]>("students.json", []);
+    const stIndex = students.findIndex((s) => s.uid === studentId);
+    if (stIndex >= 0) {
+      if (students[stIndex].classId === classId || students[stIndex].classGrade === cls.name) {
+        students[stIndex].classId = undefined;
+        students[stIndex].classGrade = "Chưa tham gia lớp";
+        students[stIndex].updatedAt = new Date().toISOString();
+        writeJsonData("students.json", students);
+      }
+    }
+
+    const remainingStudents = students.filter(
+      (st) => st.classId === cls.id || (!st.classId && st.classGrade === cls.name)
+    );
+    cls.studentCount = remainingStudents.length;
+    cls.updatedAt = new Date().toISOString();
+    writeJsonData("classes.json", currentClasses);
+
+    if (fbDb) {
+      try {
+        await fbSetDoc(fbDoc(fbDb, "classes", classId), {
+          removedStudents: cls.removedStudents,
+          studentCount: cls.studentCount,
+          updatedAt: cls.updatedAt,
+        }, { merge: true });
+
+        await fbSetDoc(fbDoc(fbDb, "users", studentId), {
+          classId: null,
+          classGrade: "Chưa tham gia lớp",
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      } catch (e) {}
+    }
+
+    res.json({
+      success: true,
+      message: "Đã gỡ học sinh khỏi lớp học thành công.",
+      studentCount: cls.studentCount,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi gỡ học sinh: " + err.message });
   }
 });
 

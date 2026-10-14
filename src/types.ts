@@ -230,6 +230,8 @@ export interface ClassItem {
   status: "active" | "deleted";
   deletedAt?: string;
   inviteCode?: string;
+  allowJoinByCode?: boolean; // Cho phép học sinh tham gia bằng mã
+  removedStudents?: string[]; // Danh sách UID học sinh đã bị gỡ khỏi lớp
 }
 
 export interface ChatMessage {

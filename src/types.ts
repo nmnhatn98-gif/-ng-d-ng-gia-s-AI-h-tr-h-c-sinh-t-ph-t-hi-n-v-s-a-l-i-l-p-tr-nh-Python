@@ -18,6 +18,7 @@ export interface UserProfile {
   passwordHash?: string;
   isGoogleLinked?: boolean;
   googleEmail?: string;
+  mustChangePassword?: boolean;
   createdAt?: string;
 }
 

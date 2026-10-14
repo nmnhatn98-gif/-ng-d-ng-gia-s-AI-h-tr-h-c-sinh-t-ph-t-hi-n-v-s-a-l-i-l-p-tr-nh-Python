@@ -39,6 +39,7 @@ import {
   deleteDoc 
 } from "firebase/firestore";
 import { syncStudentsWithCloud, isMockStudent } from "./data/studentService";
+import { ChangePasswordModal } from "./components/ChangePasswordModal";
 
 const MOCK_CLASS_IDS = new Set([
   "cls-th-01",
@@ -51,14 +52,6 @@ const MOCK_CLASS_IDS = new Set([
 function isMockClass(cls: ClassItem | null | undefined): boolean {
   if (!cls || !cls.id) return false;
   if (MOCK_CLASS_IDS.has(cls.id)) return true;
-  if (
-    cls.id.startsWith("cls-th-") ||
-    cls.id.startsWith("cls-thcs-") ||
-    cls.id.startsWith("cls-thpt-") ||
-    cls.id.startsWith("cls-stem-")
-  ) {
-    return true;
-  }
   return false;
 }
 
@@ -286,36 +279,47 @@ export function App() {
           });
         }
 
-        // Load classes from primary server API first
+        // Load classes from primary Firestore first (works across laptop, tablet, phone)
         try {
-          const token = await auth.currentUser?.getIdToken();
-          const clsRes = await fetch("/api/classes?includeDeleted=true", {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          });
-          if (clsRes.ok) {
-            const clsData = await clsRes.json();
-            if (Array.isArray(clsData.classes) && clsData.classes.length > 0) {
-              const loaded = clsData.classes.filter((c: any) => !isMockClass(c));
-              setClasses(loaded);
-              try {
-                localStorage.setItem("lms_classes", JSON.stringify(loaded));
-              } catch (e) {}
-            }
-          }
-        } catch (apiErr) {
-          console.warn("Server classes load fallback to Firestore:", apiErr);
           const classesSnap = await getDocs(collection(db, "classes"));
           if (!classesSnap.empty) {
             const loadedClasses = classesSnap.docs
               .map((d) => ({ id: d.id, ...d.data() } as ClassItem))
               .filter((c) => !isMockClass(c));
-            setClasses(loadedClasses);
-            try {
-              localStorage.setItem("lms_classes", JSON.stringify(loadedClasses));
-            } catch (e) {}
+            if (loadedClasses.length > 0) {
+              setClasses(loadedClasses);
+              try {
+                localStorage.setItem("lms_classes", JSON.stringify(loadedClasses));
+              } catch (e) {}
+            }
           }
+        } catch (fsClsErr) {
+          console.warn("Firestore classes load notice:", fsClsErr);
+        }
+
+        // Also sync classes from server API
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          const clsRes = await fetch("/api/classes?includeDeleted=true", {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (clsRes.ok) {
+            const clsData = await clsRes.json();
+            if (Array.isArray(clsData.classes) && clsData.classes.length > 0) {
+              const loaded = clsData.classes.filter((c: any) => !isMockClass(c));
+              setClasses((prev) => {
+                const map = new Map(prev.map((c) => [c.id, c]));
+                loaded.forEach((c: any) => map.set(c.id, c));
+                const merged = Array.from(map.values());
+                try {
+                  localStorage.setItem("lms_classes", JSON.stringify(merged));
+                } catch (e) {}
+                return merged;
+              });
+            }
+          }
+        } catch (apiErr) {
+          console.warn("Server classes sync notice:", apiErr);
         }
       } catch (err) {
         console.warn("Firestore sync fallback:", err);
@@ -323,6 +327,35 @@ export function App() {
     };
 
     loadPersistentData();
+
+    // Listen to Auth State Changes
+    const unsubAuth = auth.onAuthStateChanged(async (fbUser) => {
+      if (fbUser) {
+        loadPersistentData();
+        // If teacher, ensure any local classes not yet in Firestore are uploaded safely
+        try {
+          const saved = localStorage.getItem("lms_classes");
+          if (saved) {
+            const localCls: ClassItem[] = JSON.parse(saved);
+            const classesSnap = await getDocs(collection(db, "classes"));
+            const cloudIds = new Set(classesSnap.docs.map((d) => d.id));
+            for (const cls of localCls) {
+              if (cls.id && !cloudIds.has(cls.id) && !isMockClass(cls)) {
+                await setDoc(doc(db, "classes", cls.id), {
+                  ...cls,
+                  ownerUid: cls.ownerUid || fbUser.uid,
+                  ownerEmail: cls.ownerEmail || fbUser.email,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Local migration notice:", e);
+        }
+      }
+    });
+
+    return () => unsubAuth();
   }, []);
 
   // Role Toggle
@@ -1127,6 +1160,18 @@ export function App() {
         isOpen={isAboutOpen}
         onClose={() => setIsAboutOpen(false)}
       />
+
+      {/* Mandatory First-Time Password Change Modal */}
+      {currentUser && currentUser.mustChangePassword && (
+        <ChangePasswordModal
+          user={currentUser}
+          isOpen={true}
+          onSuccess={(updated) => {
+            setCurrentUser(updated);
+            showToast("🎉 Đổi mật khẩu thành công! Chào mừng em đến với CodeHiểu.");
+          }}
+        />
+      )}
     </div>
   );
 }

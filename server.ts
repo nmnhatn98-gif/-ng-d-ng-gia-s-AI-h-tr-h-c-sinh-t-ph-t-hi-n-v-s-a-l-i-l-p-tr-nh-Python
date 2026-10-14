@@ -13,6 +13,15 @@ import mammoth from "mammoth";
 import * as xlsx from "xlsx";
 import { PDFParse } from "pdf-parse";
 
+import { initializeApp as initFbApp, getApps as getFbApps } from "firebase/app";
+import { 
+  getFirestore as getFbFirestore, 
+  collection as fbCol, 
+  getDocs as fbGetDocs, 
+  setDoc as fbSetDoc, 
+  doc as fbDoc 
+} from "firebase/firestore";
+
 import dns from "node:dns";
 try {
   dns.setDefaultResultOrder("ipv4first");
@@ -55,10 +64,62 @@ app.use((err: any, req: any, res: any, next: any) => {
 const DATA_DIR = path.join(process.cwd(), "data");
 
 let firebaseApiKey = "";
+let fbConfigObj: any = null;
+let fbApp: any = null;
+let fbDb: any = null;
+
 try {
-  const fbConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
-  firebaseApiKey = fbConfig.apiKey || "";
-} catch (e) {}
+  fbConfigObj = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
+  firebaseApiKey = fbConfigObj.apiKey || "";
+  fbApp = getFbApps().length === 0 ? initFbApp(fbConfigObj) : getFbApps()[0];
+  fbDb = getFbFirestore(fbApp, fbConfigObj.firestoreDatabaseId || "ai-studio-lmstinhcstem-1186d691-6168-49ab-96de-0be6189db972");
+} catch (e) {
+  console.warn("Could not init server Firebase Firestore:", e);
+}
+
+// Background startup sync from persistent Firestore database
+async function syncFromFirestoreOnStartup() {
+  if (!fbDb) return;
+  try {
+    // 1. Sync classes
+    const classesSnap = await fbGetDocs(fbCol(fbDb, "classes"));
+    if (!classesSnap.empty) {
+      const cloudClasses = classesSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      const currentClasses = readJsonData<any[]>("classes.json", []);
+      const map = new Map<string, any>();
+      cloudClasses.forEach((c: any) => map.set(c.id, c));
+      currentClasses.forEach((c: any) => {
+        if (!map.has(c.id)) map.set(c.id, c);
+      });
+      writeJsonData("classes.json", Array.from(map.values()));
+    }
+
+    // 2. Sync students
+    const usersSnap = await fbGetDocs(fbCol(fbDb, "users"));
+    if (!usersSnap.empty) {
+      const cloudStudents: any[] = [];
+      usersSnap.docs.forEach((d: any) => {
+        const u = d.data() as any;
+        if (u.role === "student" || !u.role) {
+          cloudStudents.push({ uid: d.id, ...u });
+        }
+      });
+      if (cloudStudents.length > 0) {
+        saveToStudentVault(cloudStudents);
+        const currentStudents = readJsonData<any[]>("students.json", []);
+        const sMap = new Map<string, any>();
+        cloudStudents.forEach((s: any) => sMap.set(s.uid, s));
+        currentStudents.forEach((s: any) => {
+          if (!sMap.has(s.uid)) sMap.set(s.uid, s);
+        });
+        writeJsonData("students.json", Array.from(sMap.values()));
+      }
+    }
+  } catch (err) {
+    console.warn("Server Firestore startup sync notice:", err);
+  }
+}
+setTimeout(syncFromFirestoreOnStartup, 1000);
 
 // Trusted teacher list (persisted in data/teachers.json)
 const DEFAULT_TEACHER_EMAILS = [
@@ -713,18 +774,50 @@ app.post("/api/auth/student-login", async (req, res) => {
       );
     });
 
-    if (!matched) {
+    let finalMatched = matched;
+
+    if (!finalMatched && fbDb) {
+      try {
+        const usersSnap = await fbGetDocs(fbCol(fbDb, "users"));
+        if (!usersSnap.empty) {
+          const foundDoc = usersSnap.docs.find((d: any) => {
+            const s = d.data();
+            const sCode = String(s.studentCode || "").toLowerCase();
+            const sEmail = String(s.email || "").toLowerCase();
+            const sName = String(s.displayName || "").toLowerCase();
+            const sUid = String(s.uid || d.id).toLowerCase();
+            return (
+              sCode === cleanId ||
+              sEmail === cleanId ||
+              sUid === cleanId ||
+              sName === cleanId ||
+              sName.replace(/\s+/g, "") === cleanId.replace(/\s+/g, "")
+            );
+          });
+          if (foundDoc) {
+            finalMatched = { uid: foundDoc.id, ...foundDoc.data() };
+            // Cache back into students.json
+            students.unshift(finalMatched);
+            writeJsonData("students.json", students);
+          }
+        }
+      } catch (fsErr) {
+        console.warn("Firestore lookup student login fallback notice:", fsErr);
+      }
+    }
+
+    if (!finalMatched) {
       return res.status(404).json({ error: `Không tìm thấy tài khoản học sinh "${identifier}".` });
     }
 
-    const isValid = verifyPassword(password, matched.passwordHash, matched.password);
+    const isValid = verifyPassword(password, finalMatched.passwordHash, finalMatched.password);
     if (!isValid) {
       return res.status(401).json({ error: "Mật khẩu không chính xác. Vui lòng kiểm tra lại!" });
     }
 
     return res.json({
       success: true,
-      student: sanitizeStudent(matched),
+      student: sanitizeStudent(finalMatched),
     });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi đăng nhập học sinh: " + err.message });
@@ -935,7 +1028,14 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
     if (!authTeacher) return;
 
     const { classId } = req.params;
-    const { rawText, students: rawStudents, previewOnly } = req.body;
+    const { 
+      rawText, 
+      students: rawStudents, 
+      previewOnly,
+      passwordMode = "auto",
+      sharedPassword = "",
+      mustChangePassword = false
+    } = req.body;
 
     const currentClasses = readJsonData<any[]>("classes.json", []);
     const targetClass = currentClasses.find((c) => c.id === classId);
@@ -967,6 +1067,7 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
       rawLine: string;
       displayName: string;
       studentCode?: string;
+      password?: string;
       error?: string;
       isDuplicate?: boolean;
     }
@@ -977,6 +1078,7 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
       rawStudents.forEach((st: any) => {
         const name = String(st.displayName || st.name || "").trim();
         const code = String(st.studentCode || st.code || "").trim();
+        const pass = st.password !== undefined ? String(st.password) : undefined;
         if (!name) {
           parsedRows.push({ rawLine: JSON.stringify(st), displayName: "", error: "Thiếu họ và tên học sinh" });
         } else if (name.length < 2) {
@@ -984,7 +1086,7 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
         } else if (name.length > 60) {
           parsedRows.push({ rawLine: name, displayName: name, error: "Họ và tên quá dài (> 60 ký tự)" });
         } else {
-          parsedRows.push({ rawLine: name, displayName: name, studentCode: code || undefined });
+          parsedRows.push({ rawLine: name, displayName: name, studentCode: code || undefined, password: pass });
         }
       });
     } else if (typeof rawText === "string") {
@@ -996,19 +1098,30 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
       lines.forEach((line) => {
         let parts: string[] = [];
         if (line.includes("\t")) {
-          parts = line.split("\t").map((p) => p.trim()).filter(Boolean);
+          parts = line.split("\t").map((p) => p.trim());
         } else if (line.includes(",")) {
-          parts = line.split(",").map((p) => p.trim()).filter(Boolean);
+          parts = line.split(",").map((p) => p.trim());
         } else if (line.includes(";")) {
-          parts = line.split(";").map((p) => p.trim()).filter(Boolean);
+          parts = line.split(";").map((p) => p.trim());
         }
 
-        if (parts.length >= 2) {
-          const p0 = parts[0];
-          const p1 = parts[1];
-          const isP0Code = /^[a-zA-Z0-9_\-\.]+$/.test(p0) && p0.length <= 20;
-          let code = isP0Code ? p0 : "";
-          let name = isP0Code ? p1 : p0;
+        if (parts.length >= 3) {
+          // Col 0: Name or Code, Col 1: Code or Name, Col 2: Password
+          const isP0Code = /^[a-zA-Z0-9_\-\.]+$/.test(parts[0]) && parts[0].length <= 20;
+          let code = isP0Code ? parts[0] : parts[1];
+          let name = isP0Code ? parts[1] : parts[0];
+          let pass = parts[2];
+          if (!name) {
+            parsedRows.push({ rawLine: line, displayName: "", error: "Không tìm thấy họ tên học sinh trên dòng này" });
+          } else if (name.length < 2) {
+            parsedRows.push({ rawLine: line, displayName: name, error: "Họ tên quá ngắn" });
+          } else {
+            parsedRows.push({ rawLine: line, displayName: name, studentCode: code || undefined, password: pass || undefined });
+          }
+        } else if (parts.length === 2) {
+          const isP0Code = /^[a-zA-Z0-9_\-\.]+$/.test(parts[0]) && parts[0].length <= 20;
+          let code = isP0Code ? parts[0] : parts[1];
+          let name = isP0Code ? parts[1] : parts[0];
 
           if (!name) {
             parsedRows.push({ rawLine: line, displayName: "", error: "Không tìm thấy họ tên học sinh trên dòng này" });
@@ -1046,6 +1159,11 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
           batchCodes.add(upper);
         }
       }
+      if (passwordMode === "individual" && row.password !== undefined) {
+        if (row.password.length < 6) {
+          row.error = (row.error ? row.error + "; " : "") + "Mật khẩu riêng phải có ít nhất 6 ký tự";
+        }
+      }
     });
 
     const validRows = parsedRows.filter((r) => !r.error);
@@ -1068,6 +1186,15 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
         error: "Không có dòng học sinh nào hợp lệ để tạo tài khoản.",
         errors: errorRows,
       });
+    }
+
+    // Validate shared password if mode is shared
+    if (passwordMode === "shared") {
+      if (!sharedPassword || sharedPassword.length < 6) {
+        return res.status(400).json({
+          error: "Mật khẩu ban đầu chung cho cả đợt tạo phải có tối thiểu 6 ký tự.",
+        });
+      }
     }
 
     const cleanClassTag = targetClass.name
@@ -1097,7 +1224,16 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
         counter++;
       }
 
-      const initialPassword = generateInitialPassword();
+      // Determine initial password based on teacher choice
+      let initialPassword = "";
+      if (passwordMode === "shared") {
+        initialPassword = sharedPassword;
+      } else if (passwordMode === "individual" && row.password && row.password.length >= 6) {
+        initialPassword = row.password;
+      } else {
+        initialPassword = generateInitialPassword();
+      }
+
       const passwordHash = hashPassword(initialPassword);
       const email = `${code.toLowerCase().replace(/[^a-z0-9]/g, "")}@hocsinh.lms.vn`;
       const uid = `std-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
@@ -1113,6 +1249,7 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
         email,
         passwordHash,
         role: "student",
+        mustChangePassword: mustChangePassword || (passwordMode === "shared"),
         createdAt: new Date().toISOString(),
       };
 
@@ -1127,6 +1264,17 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
         initialPassword,
         success: true,
       });
+
+      // Synchronize directly into Firestore users collection for immediate cross-device access
+      if (fbDb) {
+        try {
+          fbSetDoc(fbDoc(fbDb, "users", uid), newStudent, { merge: true }).catch((e: any) => {
+            console.warn("Async Firestore save student notice:", e);
+          });
+        } catch (fsErr) {
+          console.warn("Firestore save user doc err:", fsErr);
+        }
+      }
     }
 
     const updatedStudents = [...newStudentsToSave, ...existingStudents];
@@ -1136,6 +1284,13 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
     targetClass.studentCount = (existingInClass.length + newStudentsToSave.length);
     writeJsonData("classes.json", currentClasses);
 
+    // Sync class updated count to Firestore
+    if (fbDb && targetClass.id) {
+      try {
+        fbSetDoc(fbDoc(fbDb, "classes", targetClass.id), targetClass, { merge: true }).catch(() => {});
+      } catch (e) {}
+    }
+
     return res.json({
       success: true,
       createdCount: newStudentsToSave.length,
@@ -1144,7 +1299,7 @@ app.post("/api/classes/:classId/students/batch", async (req, res) => {
       results: createdResults,
       failedRows: errorRows,
       authNotice:
-        "Tài khoản học sinh được kích hoạt ngay trong hệ thống xác thực của nền tảng với định danh và mật khẩu ngẫu nhiên an toàn. Mật khẩu ban đầu chỉ hiển thị một lần duy nhất tại đây, vui lòng tải file hoặc lưu giữ để cấp cho học sinh.",
+        "Tài khoản học sinh được kích hoạt ngay trong hệ thống xác thực của nền tảng với mật khẩu do giáo viên thiết lập. Mật khẩu ban đầu chỉ hiển thị một lần duy nhất tại phiên tạo này để đảm bảo an toàn bảo mật.",
     });
   } catch (err: any) {
     res.status(500).json({ error: "Lỗi tạo tài khoản học sinh hàng loạt: " + err.message });

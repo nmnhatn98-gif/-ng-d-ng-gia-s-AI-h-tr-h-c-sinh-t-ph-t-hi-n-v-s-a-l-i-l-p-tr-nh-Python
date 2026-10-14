@@ -98,9 +98,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     setIsVerifyingCode(true);
     setInviteCodeError(null);
     try {
-      const cls = await verifyClassInviteCode(clean);
-      setVerifiedClass(cls);
-      setInviteCodeError(null);
+      const res = await verifyClassInviteCode(clean);
+      if (res.success && res.class) {
+        setVerifiedClass(res.class);
+        setInviteCodeError(null);
+      } else {
+        setVerifiedClass(null);
+        setInviteCodeError(res.error || "Mã lớp không hợp lệ hoặc đã hết hạn.");
+      }
     } catch (err: any) {
       setVerifiedClass(null);
       setInviteCodeError(err.message || "Mã lớp không hợp lệ hoặc đã hết hạn.");
@@ -132,7 +137,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     setFieldErrors({});
     setIsSubmitting(true);
     try {
-      const student = await loginStudentViaApi(cleanId, loginPassword);
+      const res = await loginStudentViaApi(cleanId, loginPassword);
+      if (!res.success || !res.student) {
+        throw new Error(res.error || "Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin!");
+      }
+      const student = { ...res.student, mustChangePassword: res.mustChangePassword };
       setGeneralSuccess(`Xin chào ${student.displayName}! Đăng nhập thành công.`);
       setTimeout(() => {
         onSelectUser(student);
@@ -182,16 +191,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     setFieldErrors({});
     setIsSubmitting(true);
     try {
-      const newStudent = await registerStudentViaApi({
+      const res = await registerStudentViaApi({
         displayName: cleanName,
         username: cleanUser,
         password: regPassword,
         inviteCode: regInviteCode.trim().toUpperCase() || undefined,
       });
 
+      if (!res.success || !res.student) {
+        throw new Error(res.error || "Không thể tạo tài khoản. Vui lòng thử lại!");
+      }
+
       setGeneralSuccess("Tạo tài khoản thành công! Đang chuyển hướng vào bài học...");
       setTimeout(() => {
-        onSelectUser(newStudent);
+        onSelectUser(res.student!);
       }, 450);
     } catch (err: any) {
       setGeneralError(err.message || "Không thể tạo tài khoản. Vui lòng thử lại!");

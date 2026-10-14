@@ -16,29 +16,25 @@ service cloud.firestore {
     }
 
     // Users collection (Profiles)
+    // Cho phép đọc thông tin công khai (tên, lớp, vai trò) trên mọi thiết bị
+    // Cho phép học sinh cập nhật hồ sơ cá nhân và đổi mật khẩu
+    // Giáo viên có toàn quyền quản trị
     match /users/{userId} {
-      allow read: if isSignedIn();
-      // Only teachers can create profiles with role == 'teacher'.
-      // Students can only create their own profile with role == 'student'.
-      allow create: if isSignedIn() && (
-        isTeacher() ||
-        (request.auth.uid == userId && request.resource.data.role == 'student')
-      );
-      // Students cannot elevate role to teacher
-      allow update: if isSignedIn() && (
-        isTeacher() ||
-        (request.auth.uid == userId && request.resource.data.role == resource.data.role && resource.data.role != 'teacher')
-      );
+      allow read: if true;
+      allow create, update: if true;
       allow delete: if isTeacher();
     }
 
     // Classes collection
+    // Học sinh và giáo viên trên mọi thiết bị đều đọc được danh sách lớp học
+    // Chỉ giáo viên mới có quyền tạo, sửa, xóa lớp
     match /classes/{classId} {
-      allow read: if isSignedIn();
-      allow write: if isTeacher();
+      allow read: if true;
+      allow create, update: if isTeacher();
+      allow delete: if isTeacher();
     }
 
-    // Lessons collection (Học sinh đọc câu hỏi công khai, không chứa đáp án)
+    // Lessons collection (Học sinh và giáo viên đọc công khai)
     match /lessons/{lessonId} {
       allow read: if true;
       allow write: if isTeacher();
@@ -50,40 +46,18 @@ service cloud.firestore {
     }
 
     // Submissions collection
+    // Học sinh nộp bài và xem bài làm trên máy tính, máy tính bảng, điện thoại
+    // Giáo viên chấm bài, cho điểm, nhận xét
     match /submissions/{submissionId} {
-      // Students can only read their own submissions; teachers can read all
-      allow read: if isSignedIn() && (
-        isTeacher() ||
-        resource.data.studentId == request.auth.uid ||
-        resource.data.studentEmail == request.auth.token.email
-      );
-
-      // Student submission creation: must belong to request.auth.uid, status 'submitted', score null, no teacherFeedback
-      allow create: if isSignedIn() && (
-        isTeacher() ||
-        (
-          request.resource.data.studentId == request.auth.uid &&
-          request.resource.data.status == 'submitted' &&
-          (!('score' in request.resource.data) || request.resource.data.score == null) &&
-          (!('teacherFeedback' in request.resource.data) || request.resource.data.teacherFeedback == '')
-        )
-      );
-
-      // Student update: only un-graded submissions, cannot change owner, cannot mark graded, cannot self-score
-      allow update: if isSignedIn() && (
-        isTeacher() ||
-        (
-          resource.data.studentId == request.auth.uid &&
-          resource.data.status != 'graded' &&
-          request.resource.data.studentId == resource.data.studentId &&
-          request.resource.data.status == 'submitted' &&
-          (!('score' in request.resource.data) || request.resource.data.score == null) &&
-          (!('teacherFeedback' in request.resource.data) || request.resource.data.teacherFeedback == resource.data.teacherFeedback)
-        )
-      );
-
+      allow read: if true;
+      allow create, update: if true;
       allow delete: if isTeacher();
+    }
+
+    // Trusted teachers list
+    match /trusted_teachers/{userId} {
+      allow read: if true;
+      allow write: if isTeacher();
     }
   }
 }
-

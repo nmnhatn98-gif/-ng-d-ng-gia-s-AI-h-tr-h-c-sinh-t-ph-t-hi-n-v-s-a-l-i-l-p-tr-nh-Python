@@ -324,8 +324,8 @@ export const TeacherUgotManager: React.FC<TeacherUgotManagerProps> = ({ currentU
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Thư viện UGOT:</span>
-                      <span className={device.hasUgot ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
-                        {device.hasUgot ? "✅ Đã cài đặt" : "⚠️ Chưa cài"}
+                      <span className={(device.stage1Passed || Boolean(device.ugotVersion)) ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
+                        {(device.stage1Passed || Boolean(device.ugotVersion)) ? "✅ Đã cài đặt" : "⚠️ Chưa cài"}
                       </span>
                     </div>
                     <div className="flex justify-between">

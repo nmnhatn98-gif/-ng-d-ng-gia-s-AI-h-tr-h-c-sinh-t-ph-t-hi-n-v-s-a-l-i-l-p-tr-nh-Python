@@ -118,8 +118,29 @@ export const QuizCreatorModal: React.FC<QuizCreatorModalProps> = ({
         }),
       });
 
-      const data = await response.json();
-      if (data.success && Array.isArray(data.questions)) {
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const textSample = await response.text().catch(() => "");
+        const isHtml = textSample.trim().startsWith("<") || contentType.includes("text/html");
+        throw new Error(
+          isHtml
+            ? `Máy chủ trả về HTML thay vì JSON (HTTP ${response.status}). Vui lòng kiểm tra backend API.`
+            : `Định dạng phản hồi không hợp lệ (${contentType.split(";")[0] || "unknown"}, HTTP ${response.status}).`
+        );
+      }
+
+      let data: any;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Không thể phân tích dữ liệu JSON phản hồi từ máy chủ.");
+      }
+
+      if (!response.ok) {
+        throw new Error(data?.error || `Lỗi máy chủ (${response.status})`);
+      }
+
+      if (data.success && Array.isArray(data.questions) && data.questions.length > 0) {
         setQuestions((prev) => [...prev, ...data.questions]);
         setAiSuccessMessage(
           `✨ Gemini AI đã tạo thành công ${data.questions.length} câu hỏi trắc nghiệm! Bạn có thể xem và chỉnh sửa bên dưới.`
@@ -143,7 +164,7 @@ export const QuizCreatorModal: React.FC<QuizCreatorModalProps> = ({
           );
         }
       } else {
-        setAiError(data.error || "Không thể tạo câu hỏi, vui lòng thử lại.");
+        setAiError(data?.error || "Không thể tạo câu hỏi, vui lòng thử lại.");
       }
     } catch (err: any) {
       setAiError(`Lỗi kết nối: ${err.message || "Vui lòng thử lại"}`);

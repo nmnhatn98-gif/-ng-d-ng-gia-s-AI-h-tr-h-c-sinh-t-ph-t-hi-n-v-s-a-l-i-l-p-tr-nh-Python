@@ -913,22 +913,47 @@ ${j}
         }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const textSample = await res.text().catch(() => "");
+        const isHtml = textSample.trim().startsWith("<") || contentType.includes("text/html");
+        throw new Error(
+          isHtml
+            ? `Máy chủ trả về HTML thay vì JSON (HTTP ${res.status}).`
+            : `Định dạng phản hồi không hợp lệ (${contentType.split(";")[0] || "unknown"}, HTTP ${res.status}).`
+        );
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error("Không thể đọc phản hồi JSON từ máy chủ.");
+      }
+
+      if (!res.ok) {
+        throw new Error(data?.error || `Lỗi máy chủ (${res.status})`);
+      }
+
+      if (!data || typeof data !== "object" || typeof data.text !== "string" || !data.text.trim()) {
+        throw new Error(data?.error || "Phản hồi từ AI không đúng cấu trúc.");
+      }
+
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: data.text || "Mình đã nhận được câu hỏi. Bạn thử kiểm tra lại cấu trúc đóng mở thẻ nhé!",
+        content: data.text,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
       setAiMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
+    } catch (err: any) {
       setAiMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: "assistant",
-          content: "⚠️ Không thể kết nối với Trợ lý AI. Vui lòng thử lại sau.",
+          content: `⚠️ Lỗi kết nối AI: ${err?.message || "Không thể kết nối với Trợ lý AI. Vui lòng thử lại sau."}`,
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         },
       ]);

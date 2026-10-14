@@ -10,10 +10,12 @@ export interface UserProfile {
   avatar?: string;
   photoURL?: string;
   school?: string;
+  classId?: string;
   classGrade?: string;
   gradeLevel?: GradeLevel;
   studentCode?: string;
   password?: string;
+  passwordHash?: string;
   isGoogleLinked?: boolean;
   googleEmail?: string;
   createdAt?: string;
@@ -209,12 +211,18 @@ export interface ClassItem {
   name: string;
   gradeLevel: GradeLevel;
   studentCount: number;
+  expectedStudentCount?: number;
   teacherName: string;
+  ownerUid?: string;
+  ownerEmail?: string;
   description: string;
   gradeNumber?: number;
   schoolYear?: string;
   room?: string;
   createdAt?: string;
+  status: "active" | "deleted";
+  deletedAt?: string;
+  inviteCode?: string;
 }
 
 export interface ChatMessage {

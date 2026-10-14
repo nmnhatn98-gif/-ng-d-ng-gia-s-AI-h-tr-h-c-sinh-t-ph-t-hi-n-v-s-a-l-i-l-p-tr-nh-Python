@@ -13,6 +13,13 @@ import mammoth from "mammoth";
 import * as xlsx from "xlsx";
 import { PDFParse } from "pdf-parse";
 
+import dns from "node:dns";
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch (e) {
+  // ignore if not supported in node runtime
+}
+
 dotenv.config();
 
 const app = express();
@@ -519,9 +526,628 @@ app.delete("/api/students/:uid", async (req, res) => {
     if (!deleteOk) {
       return res.status(500).json({ error: "Lỗi ghi đĩa máy chủ: Không thể xóa học sinh." });
     }
-    res.json({ success: true, remaining: filtered.length });
+    return res.json({ success: true, remaining: filtered.length });
   } catch (err: any) {
-    res.status(500).json({ error: "Lỗi xóa học sinh: " + err.message });
+    return res.status(500).json({ error: "Lỗi xóa học sinh: " + err.message });
+  }
+});
+
+// Password security helpers: Never store plain passwords
+const PASSWORD_SALT = "lms_salt_tin_hoc_stem_2026";
+function hashPassword(plain: string): string {
+  return crypto.createHash("sha256").update(plain + PASSWORD_SALT).digest("hex");
+}
+function verifyPassword(plain: string, hash?: string, plainLegacy?: string): boolean {
+  if (hash) {
+    return hashPassword(plain) === hash;
+  }
+  if (plainLegacy) {
+    return plain === plainLegacy;
+  }
+  return false;
+}
+function generateInitialPassword(): string {
+  const letters = "abcdefghjkmnpqrstuvwxyz23456789";
+  const uppers = "ABCDEFGHJKMNPQRSTUVWXYZ";
+  const specials = "@#$%&*";
+  let res = "";
+  for (let i = 0; i < 4; i++) res += letters[Math.floor(Math.random() * letters.length)];
+  res += uppers[Math.floor(Math.random() * uppers.length)];
+  res += specials[Math.floor(Math.random() * specials.length)];
+  for (let i = 0; i < 2; i++) res += letters[Math.floor(Math.random() * letters.length)];
+  return res;
+}
+
+function generateClassInviteCode(className: string): string {
+  const cleaned = className.toUpperCase().replace(/LỚP|LOP|\s+/g, "").replace(/[^A-Z0-9]/g, "");
+  const prefix = cleaned.slice(0, 4) || "CLS";
+  const suffix = Math.floor(100 + Math.random() * 900);
+  return `${prefix}${suffix}`;
+}
+
+// Verify class invite code publicly (no auth required for students entering code)
+app.get("/api/classes/verify-code/:code", (req, res) => {
+  const code = String(req.params.code || "").trim().toUpperCase();
+  if (!code) {
+    return res.status(400).json({ success: false, error: "Vui lòng cung cấp mã tham gia lớp." });
+  }
+  const classes = readJsonData<any[]>("classes.json", []);
+  const matched = classes.find(
+    (c) =>
+      c.status !== "deleted" &&
+      (String(c.inviteCode || "").toUpperCase() === code ||
+       String(c.id || "").toUpperCase() === code ||
+       String(c.name || "").replace(/\s+/g, "").toUpperCase() === code.replace(/\s+/g, ""))
+  );
+  if (!matched) {
+    return res.status(404).json({ success: false, error: "Mã lớp không tồn tại hoặc đã hết hạn." });
+  }
+  return res.json({
+    success: true,
+    class: {
+      id: matched.id,
+      name: matched.name,
+      gradeLevel: matched.gradeLevel,
+      teacherName: matched.teacherName,
+      schoolYear: matched.schoolYear,
+      inviteCode: matched.inviteCode || code,
+    },
+  });
+});
+
+// Student Self-Registration endpoint (no plain password saved, hashes securely, verifies class code if given)
+app.post("/api/auth/student-register", async (req, res) => {
+  try {
+    const { displayName, username, password, inviteCode } = req.body || {};
+    const cleanName = String(displayName || "").trim();
+    const cleanUsername = String(username || "").trim();
+    const cleanPassword = String(password || "").trim();
+    const cleanInvite = String(inviteCode || "").trim().toUpperCase();
+
+    if (!cleanName || cleanName.length < 2) {
+      return res.status(400).json({ error: "Họ và tên học sinh phải có ít nhất 2 ký tự." });
+    }
+    if (!cleanUsername || cleanUsername.length < 3) {
+      return res.status(400).json({ error: "Tên đăng nhập phải có ít nhất 3 ký tự." });
+    }
+    if (/\s/.test(cleanUsername)) {
+      return res.status(400).json({ error: "Tên đăng nhập không được chứa khoảng trắng." });
+    }
+    if (!cleanPassword || cleanPassword.length < 6) {
+      return res.status(400).json({ error: "Mật khẩu phải có ít nhất 6 ký tự." });
+    }
+
+    const students = readJsonData<any[]>("students.json", DEFAULT_SEED_STUDENTS);
+    const vault = readJsonData<any[]>("students_vault.json", []);
+    const all = [...students, ...vault];
+
+    // Check username duplicates
+    const lowerUser = cleanUsername.toLowerCase();
+    const exists = all.some(
+      (s) =>
+        String(s.studentCode || "").toLowerCase() === lowerUser ||
+        String(s.uid || "").toLowerCase() === lowerUser ||
+        String(s.email || "").toLowerCase() === `${lowerUser}@hocsinh.lms.vn`
+    );
+    if (exists) {
+      return res.status(400).json({ error: `Tên đăng nhập "${cleanUsername}" đã được sử dụng. Vui lòng chọn tên khác.` });
+    }
+
+    let classId: string | undefined = undefined;
+    let classGrade: string = "Chưa tham gia lớp";
+    let gradeLevel: string = "middle";
+    let school: string = "Trường học";
+
+    if (cleanInvite) {
+      const classes = readJsonData<any[]>("classes.json", []);
+      const matchedClass = classes.find(
+        (c) =>
+          c.status !== "deleted" &&
+          (String(c.inviteCode || "").toUpperCase() === cleanInvite ||
+           String(c.id || "").toUpperCase() === cleanInvite ||
+           String(c.name || "").replace(/\s+/g, "").toUpperCase() === cleanInvite.replace(/\s+/g, ""))
+      );
+      if (!matchedClass) {
+        return res.status(400).json({ error: "Mã tham gia lớp không hợp lệ hoặc lớp không còn hoạt động." });
+      }
+      classId = matchedClass.id;
+      classGrade = matchedClass.name;
+      gradeLevel = matchedClass.gradeLevel || "middle";
+      school = matchedClass.teacherName ? `Lớp thầy/cô ${matchedClass.teacherName}` : "Trường THCS / THPT";
+    }
+
+    const uid = `std_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const technicalEmail = `${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, "")}@hocsinh.lms.vn`;
+    const passwordHash = hashPassword(cleanPassword);
+
+    const newStudent = {
+      uid,
+      displayName: cleanName,
+      studentCode: cleanUsername,
+      email: technicalEmail,
+      role: "student",
+      classId,
+      classGrade,
+      gradeLevel,
+      school,
+      passwordHash,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedStudents = [newStudent, ...students.filter((s) => s.studentCode !== cleanUsername)];
+    writeJsonData("students.json", updatedStudents);
+    writeJsonData("students_vault.json", [newStudent, ...vault.filter((s) => s.studentCode !== cleanUsername)]);
+
+    return res.json({
+      success: true,
+      student: sanitizeStudent(newStudent),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Lỗi đăng ký tài khoản học sinh: " + err.message });
+  }
+});
+
+// Student Login endpoint
+app.post("/api/auth/student-login", async (req, res) => {
+  try {
+    const { identifier, password } = req.body;
+    if (!identifier || !password) {
+      return res.status(400).json({ error: "Vui lòng nhập tên đăng nhập và mật khẩu." });
+    }
+    const cleanId = String(identifier).trim().toLowerCase();
+    const students = readJsonData<any[]>("students.json", []);
+    const vault = readJsonData<any[]>("students_vault.json", []);
+    const all = [...students, ...vault];
+
+    const matched = all.find((s) => {
+      const sCode = String(s.studentCode || "").toLowerCase();
+      const sEmail = String(s.email || "").toLowerCase();
+      const sName = String(s.displayName || "").toLowerCase();
+      const sUid = String(s.uid || "").toLowerCase();
+      return (
+        sCode === cleanId ||
+        sEmail === cleanId ||
+        sUid === cleanId ||
+        sName === cleanId ||
+        sName.replace(/\s+/g, "") === cleanId.replace(/\s+/g, "")
+      );
+    });
+
+    if (!matched) {
+      return res.status(404).json({ error: `Không tìm thấy tài khoản học sinh "${identifier}".` });
+    }
+
+    const isValid = verifyPassword(password, matched.passwordHash, matched.password);
+    if (!isValid) {
+      return res.status(401).json({ error: "Mật khẩu không chính xác. Vui lòng kiểm tra lại!" });
+    }
+
+    return res.json({
+      success: true,
+      student: sanitizeStudent(matched),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi đăng nhập học sinh: " + err.message });
+  }
+});
+
+// --- Classes Management APIs ---
+// 1. Get classes
+app.get("/api/classes", async (req, res) => {
+  try {
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
+    const classes = readJsonData<any[]>("classes.json", []);
+    const students = readJsonData<any[]>("students.json", []);
+
+    // Calculate actual enrolled student count per class (not mock count)
+    const enrichedClasses = classes.map((cls) => {
+      const enrolled = students.filter(
+        (st) => st.classId === cls.id || (!st.classId && st.classGrade === cls.name)
+      );
+      return {
+        ...cls,
+        studentCount: enrolled.length,
+      };
+    });
+
+    const includeDeleted = req.query.includeDeleted === "true";
+
+    if (authUser.role === "teacher") {
+      const result = includeDeleted
+        ? enrichedClasses
+        : enrichedClasses.filter((c) => c.status !== "deleted");
+      return res.json({ success: true, classes: result, total: result.length });
+    } else {
+      const active = enrichedClasses.filter((c) => c.status !== "deleted");
+      return res.json({ success: true, classes: active, total: active.length });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi đọc danh sách lớp: " + err.message });
+  }
+});
+
+// 2. Create class
+app.post("/api/classes", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const body = req.body || {};
+    const cleanName = String(body.name || "").trim();
+    if (!cleanName) {
+      return res.status(400).json({ error: "Vui lòng nhập tên lớp học." });
+    }
+    if (cleanName.length < 2) {
+      return res.status(400).json({ error: "Tên lớp phải có ít nhất 2 ký tự." });
+    }
+    if (cleanName.length > 80) {
+      return res.status(400).json({ error: "Tên lớp không được vượt quá 80 ký tự." });
+    }
+
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+
+    // Check duplicate name within active classes owned by this teacher
+    const isDuplicate = currentClasses.some(
+      (c) =>
+        c.status !== "deleted" &&
+        c.name.toLowerCase() === cleanName.toLowerCase() &&
+        (c.ownerUid === authTeacher.uid || !c.ownerUid)
+    );
+    if (isDuplicate) {
+      return res.status(400).json({
+        error: `Lớp học với tên "${cleanName}" đang hoạt động trong danh sách của bạn. Vui lòng chọn tên khác hoặc kiểm tra lại.`,
+      });
+    }
+
+    const classId =
+      body.id && !currentClasses.some((c) => c.id === body.id)
+        ? body.id
+        : `cls-${body.gradeLevel || "gen"}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const newClass = {
+      id: classId,
+      name: cleanName,
+      gradeLevel: body.gradeLevel || "middle",
+      gradeNumber: body.gradeNumber ? Number(body.gradeNumber) : undefined,
+      expectedStudentCount: body.expectedStudentCount ? Number(body.expectedStudentCount) : undefined,
+      studentCount: 0,
+      teacherName: (body.teacherName || "Giáo viên").trim(),
+      ownerUid: authTeacher.uid,
+      ownerEmail: authTeacher.email,
+      schoolYear: (body.schoolYear || "2025 - 2026").trim(),
+      room: (body.room || "").trim(),
+      description: (body.description || "").trim(),
+      status: "active",
+      inviteCode: body.inviteCode || generateClassInviteCode(cleanName),
+      createdAt: new Date().toISOString(),
+    };
+
+    currentClasses.unshift(newClass);
+    const saveOk = writeJsonData("classes.json", currentClasses);
+    if (!saveOk) {
+      return res.status(500).json({ error: "Không thể ghi đĩa máy chủ để lưu lớp học." });
+    }
+
+    res.json({ success: true, class: newClass });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tạo lớp học: " + err.message });
+  }
+});
+
+// 3. Soft Delete class
+app.delete("/api/classes/:classId", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const students = readJsonData<any[]>("students.json", []);
+
+    const classItem = currentClasses.find((c) => c.id === classId);
+    if (!classItem) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học cần xóa." });
+    }
+
+    // Permission check: only owner teacher or master teacher
+    const isOwner =
+      classItem.ownerUid === authTeacher.uid ||
+      !classItem.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối: Bạn chỉ có thể xóa lớp do bạn quản lý." });
+    }
+
+    if (classItem.status === "deleted") {
+      return res.status(400).json({ error: "Lớp học này đã ở trong thùng rác (đã xóa)." });
+    }
+
+    const studentCount = students.filter(
+      (st) => st.classId === classItem.id || (!st.classId && st.classGrade === classItem.name)
+    ).length;
+
+    // Soft delete: status = "deleted", record deletedAt
+    classItem.status = "deleted";
+    classItem.deletedAt = new Date().toISOString();
+
+    const saveOk = writeJsonData("classes.json", currentClasses);
+    if (!saveOk) {
+      return res.status(500).json({ error: "Không thể lưu trạng thái xóa lớp lên máy chủ." });
+    }
+
+    res.json({
+      success: true,
+      message: `Đã chuyển lớp "${classItem.name}" vào mục Lớp đã xóa. Dữ liệu học sinh (${studentCount} em), bài làm và điểm số vẫn được bảo lưu an toàn.`,
+      classId,
+      studentCount,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi xóa lớp học: " + err.message });
+  }
+});
+
+// 4. Restore Soft Deleted class
+app.post("/api/classes/:classId/restore", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+
+    const classItem = currentClasses.find((c) => c.id === classId);
+    if (!classItem) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học để khôi phục." });
+    }
+
+    const isOwner =
+      classItem.ownerUid === authTeacher.uid ||
+      !classItem.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối: Bạn chỉ có thể khôi phục lớp của bạn." });
+    }
+
+    classItem.status = "active";
+    delete classItem.deletedAt;
+
+    const saveOk = writeJsonData("classes.json", currentClasses);
+    if (!saveOk) {
+      return res.status(500).json({ error: "Không thể lưu khôi phục lớp học." });
+    }
+
+    res.json({
+      success: true,
+      message: `Đã khôi phục lớp "${classItem.name}" về danh sách giảng dạy.`,
+      class: classItem,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi khôi phục lớp học: " + err.message });
+  }
+});
+
+// 5. Batch create real student accounts for a specific class
+app.post("/api/classes/:classId/students/batch", async (req, res) => {
+  try {
+    const authTeacher = await requireTeacher(req, res);
+    if (!authTeacher) return;
+
+    const { classId } = req.params;
+    const { rawText, students: rawStudents, previewOnly } = req.body;
+
+    const currentClasses = readJsonData<any[]>("classes.json", []);
+    const targetClass = currentClasses.find((c) => c.id === classId);
+    if (!targetClass) {
+      return res.status(404).json({ error: "Không tìm thấy lớp học với mã: " + classId });
+    }
+
+    if (targetClass.status === "deleted") {
+      return res.status(400).json({ error: "Lớp học này đã bị xóa. Vui lòng khôi phục lớp trước khi tạo học sinh!" });
+    }
+
+    const isOwner =
+      targetClass.ownerUid === authTeacher.uid ||
+      !targetClass.ownerUid ||
+      getTeacherEmails().includes(authTeacher.email);
+    if (!isOwner) {
+      return res.status(403).json({ error: "Quyền truy cập bị từ chối: Bạn không sở hữu lớp học này." });
+    }
+
+    const existingStudents = readJsonData<any[]>("students.json", []);
+    const vaultStudents = readJsonData<any[]>("students_vault.json", []);
+    const allExisting = [...existingStudents, ...vaultStudents];
+
+    const existingCodes = new Set(
+      allExisting.map((s) => String(s.studentCode || "").toUpperCase()).filter(Boolean)
+    );
+
+    interface ParsedRow {
+      rawLine: string;
+      displayName: string;
+      studentCode?: string;
+      error?: string;
+      isDuplicate?: boolean;
+    }
+
+    const parsedRows: ParsedRow[] = [];
+
+    if (Array.isArray(rawStudents) && rawStudents.length > 0) {
+      rawStudents.forEach((st: any) => {
+        const name = String(st.displayName || st.name || "").trim();
+        const code = String(st.studentCode || st.code || "").trim();
+        if (!name) {
+          parsedRows.push({ rawLine: JSON.stringify(st), displayName: "", error: "Thiếu họ và tên học sinh" });
+        } else if (name.length < 2) {
+          parsedRows.push({ rawLine: name, displayName: name, error: "Họ và tên quá ngắn (< 2 ký tự)" });
+        } else if (name.length > 60) {
+          parsedRows.push({ rawLine: name, displayName: name, error: "Họ và tên quá dài (> 60 ký tự)" });
+        } else {
+          parsedRows.push({ rawLine: name, displayName: name, studentCode: code || undefined });
+        }
+      });
+    } else if (typeof rawText === "string") {
+      const lines = rawText
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      lines.forEach((line) => {
+        let parts: string[] = [];
+        if (line.includes("\t")) {
+          parts = line.split("\t").map((p) => p.trim()).filter(Boolean);
+        } else if (line.includes(",")) {
+          parts = line.split(",").map((p) => p.trim()).filter(Boolean);
+        } else if (line.includes(";")) {
+          parts = line.split(";").map((p) => p.trim()).filter(Boolean);
+        }
+
+        if (parts.length >= 2) {
+          const p0 = parts[0];
+          const p1 = parts[1];
+          const isP0Code = /^[a-zA-Z0-9_\-\.]+$/.test(p0) && p0.length <= 20;
+          let code = isP0Code ? p0 : "";
+          let name = isP0Code ? p1 : p0;
+
+          if (!name) {
+            parsedRows.push({ rawLine: line, displayName: "", error: "Không tìm thấy họ tên học sinh trên dòng này" });
+          } else if (name.length < 2) {
+            parsedRows.push({ rawLine: line, displayName: name, error: "Họ tên quá ngắn" });
+          } else {
+            parsedRows.push({ rawLine: line, displayName: name, studentCode: code || undefined });
+          }
+        } else {
+          const name = line;
+          if (name.length < 2) {
+            parsedRows.push({ rawLine: line, displayName: name, error: "Họ tên quá ngắn (< 2 ký tự)" });
+          } else if (name.length > 60) {
+            parsedRows.push({ rawLine: line, displayName: name, error: "Họ tên quá dài (> 60 ký tự)" });
+          } else {
+            parsedRows.push({ rawLine: line, displayName: name });
+          }
+        }
+      });
+    }
+
+    if (parsedRows.length === 0) {
+      return res.status(400).json({ error: "Không có danh sách học sinh hợp lệ để xử lý." });
+    }
+
+    const batchCodes = new Set<string>();
+    parsedRows.forEach((row) => {
+      if (row.error) return;
+      if (row.studentCode) {
+        const upper = row.studentCode.toUpperCase();
+        if (batchCodes.has(upper) || existingCodes.has(upper)) {
+          row.isDuplicate = true;
+          row.error = `Mã học sinh "${row.studentCode}" đã tồn tại trong hệ thống`;
+        } else {
+          batchCodes.add(upper);
+        }
+      }
+    });
+
+    const validRows = parsedRows.filter((r) => !r.error);
+    const errorRows = parsedRows.filter((r) => r.error);
+
+    if (previewOnly === true) {
+      return res.json({
+        success: true,
+        previewOnly: true,
+        total: parsedRows.length,
+        validCount: validRows.length,
+        errorCount: errorRows.length,
+        duplicateCount: parsedRows.filter((r) => r.isDuplicate).length,
+        preview: parsedRows,
+      });
+    }
+
+    if (validRows.length === 0) {
+      return res.status(400).json({
+        error: "Không có dòng học sinh nào hợp lệ để tạo tài khoản.",
+        errors: errorRows,
+      });
+    }
+
+    const cleanClassTag = targetClass.name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .toUpperCase()
+      .slice(0, 8);
+
+    const existingInClass = allExisting.filter(
+      (s) => s.classId === targetClass.id || (!s.classId && s.classGrade === targetClass.name)
+    );
+    let counter = existingInClass.length + 1;
+
+    const createdResults: any[] = [];
+    const newStudentsToSave: any[] = [];
+
+    for (const row of validRows) {
+      let code = row.studentCode;
+      if (!code) {
+        let proposed = `HS-${cleanClassTag}-${counter.toString().padStart(2, "0")}`;
+        while (existingCodes.has(proposed.toUpperCase()) || batchCodes.has(proposed.toUpperCase())) {
+          counter++;
+          proposed = `HS-${cleanClassTag}-${counter.toString().padStart(2, "0")}`;
+        }
+        code = proposed;
+        counter++;
+      }
+
+      const initialPassword = generateInitialPassword();
+      const passwordHash = hashPassword(initialPassword);
+      const email = `${code.toLowerCase().replace(/[^a-z0-9]/g, "")}@hocsinh.lms.vn`;
+      const uid = `std-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
+
+      const newStudent = {
+        uid,
+        displayName: row.displayName,
+        studentCode: code,
+        classId: targetClass.id,
+        classGrade: targetClass.name,
+        gradeLevel: targetClass.gradeLevel || "middle",
+        school: targetClass.school || "Trường Phổ Thông",
+        email,
+        passwordHash,
+        role: "student",
+        createdAt: new Date().toISOString(),
+      };
+
+      newStudentsToSave.push(newStudent);
+      createdResults.push({
+        uid: newStudent.uid,
+        displayName: newStudent.displayName,
+        studentCode: newStudent.studentCode,
+        email: newStudent.email,
+        classId: newStudent.classId,
+        className: targetClass.name,
+        initialPassword,
+        success: true,
+      });
+    }
+
+    const updatedStudents = [...newStudentsToSave, ...existingStudents];
+    writeJsonData("students.json", updatedStudents);
+    saveToStudentVault(newStudentsToSave);
+
+    targetClass.studentCount = (existingInClass.length + newStudentsToSave.length);
+    writeJsonData("classes.json", currentClasses);
+
+    return res.json({
+      success: true,
+      createdCount: newStudentsToSave.length,
+      classId: targetClass.id,
+      className: targetClass.name,
+      results: createdResults,
+      failedRows: errorRows,
+      authNotice:
+        "Tài khoản học sinh được kích hoạt ngay trong hệ thống xác thực của nền tảng với định danh và mật khẩu ngẫu nhiên an toàn. Mật khẩu ban đầu chỉ hiển thị một lần duy nhất tại đây, vui lòng tải file hoặc lưu giữ để cấp cho học sinh.",
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Lỗi tạo tài khoản học sinh hàng loạt: " + err.message });
   }
 });
 
@@ -1113,12 +1739,13 @@ async function callGeminiGenerate(ai: GoogleGenAI, options: {
   temperature?: number;
   timeoutMs?: number;
 }): Promise<string> {
-  // Use model configured at server (process.env.GEMINI_MODEL); default to gemini-2.5-flash
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const preferredModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+  const candidateModels = Array.from(new Set([preferredModel, "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]));
   const timeoutMs = options.timeoutMs || 8000;
-  const maxRetries = 2; // Only retry transient errors up to 2 times
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  let lastError: any = null;
+
+  for (const model of candidateModels) {
     try {
       const config: any = {};
       if (options.temperature !== undefined) config.temperature = options.temperature;
@@ -1149,29 +1776,21 @@ async function callGeminiGenerate(ai: GoogleGenAI, options: {
       }
       throw new Error("Phản hồi rỗng từ mô hình AI.");
     } catch (err: any) {
-      const status = err?.status || err?.statusCode || (err?.message?.includes("429") ? 429 : err?.message?.includes("503") ? 503 : 500);
-      const isAuthOrClientError = status === 400 || status === 401 || status === 403 || status === 404;
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      const isQuotaExhausted = errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded") || errMsg.includes("429");
+      const isNotFound = err?.status === 404 || errMsg.includes("404") || errMsg.includes("is not found") || errMsg.includes("is no longer available");
 
-      // Do NOT retry authentication or client validation errors
-      if (isAuthOrClientError || attempt === maxRetries) {
-        throw err;
+      if (isQuotaExhausted || isNotFound) {
+        console.warn(`[Gemini SDK] Model ${model} unavailable (${isQuotaExhausted ? "quota exhausted" : "not found"}). Switching to next candidate...`);
+        continue;
       }
 
-      // Check if transient error (429 rate limit or 503 service unavailable or timeout)
-      const isTransient = status === 429 || status === 503 || status === 504 || err?.code === "TIMEOUT" || err?.message?.includes("RESOURCE_EXHAUSTED");
-      if (!isTransient) {
-        throw err;
-      }
-
-      // Exponential backoff: attempt 0 -> 1000ms, attempt 1 -> 2000ms, respecting Retry-After header
-      const retryAfterHeader = err?.response?.headers?.get?.("retry-after") || err?.retryAfter;
-      const retryWaitMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : 1000 * Math.pow(2, attempt);
-      console.warn(`[Gemini SDK] Transient error (${status}) on attempt ${attempt + 1}. Retrying in ${retryWaitMs}ms...`);
-      await new Promise((r) => setTimeout(r, retryWaitMs));
+      console.warn(`[Gemini SDK] Error on model ${model}:`, errMsg);
     }
   }
 
-  throw new Error("Không thể kết nối đến mô hình Gemini sau các lần thử lại.");
+  throw lastError || new Error("Không thể kết nối đến mô hình Gemini sau các lần thử lại.");
 }
 
 // Pedagogical fallback analyzer for Programming & Python (when AI service is unreachable)
@@ -1231,8 +1850,87 @@ function generatePedagogicalFallbackResponse(params: {
   return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nĐể giải quyết bài toán xử lý danh sách hoặc vòng lặp, ta thường duyệt qua từng phần tử:\n\`\`\`python\ntong = 0\nfor x in [1, 2, 3, 4]:\n    tong += x\nprint("Tổng là:", tong)\n\`\`\`\nEm hãy vận dụng cấu trúc tương tự để hoàn thiện bài của mình nhé!`;
 }
 
+// Diagnostic Log Mechanism for AI Chat requests
+interface ChatRequestDiagnostic {
+  id: string;
+  timestamp: string;
+  method: string;
+  url: string;
+  contentType: string;
+  ip: string;
+  userAgent?: string;
+  status?: number;
+  durationMs?: number;
+  messagePreview?: string;
+  source?: "ai" | "fallback" | "error";
+  error?: string;
+}
+
+const chatDiagnosticsLog: ChatRequestDiagnostic[] = [];
+function recordChatDiagnostic(entry: ChatRequestDiagnostic) {
+  chatDiagnosticsLog.unshift(entry);
+  if (chatDiagnosticsLog.length > 50) {
+    chatDiagnosticsLog.pop();
+  }
+}
+
+// 1. Diagnostic endpoint to inspect requests hitting /api/gemini/chat
+app.get("/api/gemini/diagnostic", (req, res) => {
+  res.json({
+    status: "ok",
+    server: "Express",
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+    nodeEnv: process.env.NODE_ENV || "development",
+    targetEndpoint: "/api/gemini/chat",
+    geminiApiKeyConfigured: Boolean(process.env.GEMINI_API_KEY),
+    geminiModel: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+    recentRequestsCount: chatDiagnosticsLog.length,
+    recentRequests: chatDiagnosticsLog.slice(0, 20),
+  });
+});
+
+// 2. Informational GET endpoint on /api/gemini/chat
+app.get("/api/gemini/chat", (req, res) => {
+  const fullUrl = `${req.protocol}://${req.get("host") || "localhost"}${req.originalUrl || req.url}`;
+  const contentType = req.headers["content-type"] || "(none)";
+  console.log(`🔍 [Express /api/gemini/chat Diagnostic] GET ${fullUrl} | Content-Type: ${contentType}`);
+  res.json({
+    status: "active",
+    server: "Express",
+    endpoint: "/api/gemini/chat",
+    method: "GET",
+    acceptedMethod: "POST",
+    expectedContentType: "application/json",
+    message: "Endpoint /api/gemini/chat đang hoạt động trực tiếp trên Express server. Hãy gửi HTTP POST với Content-Type: application/json.",
+    diagnosticUrl: "/api/gemini/diagnostic",
+  });
+});
+
 // AI Assistant Endpoint (Gia Sư AI Tin học & Python)
 app.post("/api/gemini/chat", async (req, res) => {
+  const startTime = Date.now();
+  const reqMethod = req.method;
+  const fullUrl = `${req.protocol}://${req.get("host") || "localhost"}${req.originalUrl || req.url}`;
+  const contentType = req.headers["content-type"] || "(not set)";
+  const clientIp = req.ip || (req.headers["x-forwarded-for"] as string) || "unknown";
+  const userAgent = req.headers["user-agent"] || "(unknown)";
+
+  // Diagnostic Log Mechanism: verify request reaches Express before Vite fallback
+  console.log(
+    `🚀 [Express Hit /api/gemini/chat] Method: ${reqMethod} | Full URL: ${fullUrl} | Content-Type: ${contentType} | Client IP: ${clientIp}`
+  );
+
+  const diagEntry: ChatRequestDiagnostic = {
+    id: `diag-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    method: reqMethod,
+    url: fullUrl,
+    contentType,
+    ip: clientIp,
+    userAgent,
+  };
+
   try {
     const { 
       message, 
@@ -1245,12 +1943,23 @@ app.post("/api/gemini/chat", async (req, res) => {
       hintLevel, 
       studentId,
       allowFallback = true 
-    } = req.body;
+    } = req.body || {};
+
+    if (message && typeof message === "string") {
+      diagEntry.messagePreview = message.slice(0, 100);
+    }
 
     // 1. Rate Limiting Check (Max 15 requests/minute per client/IP)
     const clientKey = String(studentId || req.ip || "client-anon");
     const rateCheck = checkAiRateLimit(clientKey);
     if (!rateCheck.allowed) {
+      diagEntry.status = 429;
+      diagEntry.durationMs = Date.now() - startTime;
+      diagEntry.source = "error";
+      diagEntry.error = "Rate limit exceeded";
+      recordChatDiagnostic(diagEntry);
+
+      console.warn(`⚠️ [Express /api/gemini/chat] 429 Rate Limit for ${clientKey}`);
       res.setHeader("Retry-After", String(rateCheck.retryAfter || 15));
       return res.status(429).json({
         error: `Bạn đang gửi yêu cầu quá nhanh. Vui lòng đợi ${rateCheck.retryAfter} giây rồi thử lại.`,
@@ -1260,9 +1969,19 @@ app.post("/api/gemini/chat", async (req, res) => {
 
     // 2. Request payload validation
     if (message && typeof message === "string" && message.length > 1000) {
+      diagEntry.status = 400;
+      diagEntry.durationMs = Date.now() - startTime;
+      diagEntry.source = "error";
+      diagEntry.error = "Message too long";
+      recordChatDiagnostic(diagEntry);
       return res.status(400).json({ error: "Câu hỏi quá dài (tối đa 1000 ký tự)." });
     }
     if (codeContext && typeof codeContext === "string" && codeContext.length > 10000) {
+      diagEntry.status = 400;
+      diagEntry.durationMs = Date.now() - startTime;
+      diagEntry.source = "error";
+      diagEntry.error = "Code context too long";
+      recordChatDiagnostic(diagEntry);
       return res.status(400).json({ error: "Mã nguồn gửi kèm quá dài (tối đa 10.000 ký tự)." });
     }
 
@@ -1322,6 +2041,13 @@ ${levelDirective}
         });
 
         if (text && text.trim()) {
+          const duration = Date.now() - startTime;
+          diagEntry.status = 200;
+          diagEntry.durationMs = duration;
+          diagEntry.source = "ai";
+          recordChatDiagnostic(diagEntry);
+
+          console.log(`✅ [Express /api/gemini/chat] Responded 200 OK in ${duration}ms from AI model`);
           return res.json({
             text: text.trim(),
             source: "ai",
@@ -1344,6 +2070,13 @@ ${levelDirective}
         hintLevel: selectedLevel,
       });
 
+      const duration = Date.now() - startTime;
+      diagEntry.status = 200;
+      diagEntry.durationMs = duration;
+      diagEntry.source = "fallback";
+      recordChatDiagnostic(diagEntry);
+
+      console.log(`ℹ️ [Express /api/gemini/chat] Responded 200 OK in ${duration}ms with Pedagogical Fallback`);
       return res.json({
         text: fallbackResponse,
         source: "fallback",
@@ -1354,12 +2087,27 @@ ${levelDirective}
     }
 
     // If client requested strict AI only and AI failed, return HTTP 503 (Never 200 for error!)
+    const duration = Date.now() - startTime;
+    diagEntry.status = 503;
+    diagEntry.durationMs = duration;
+    diagEntry.source = "error";
+    diagEntry.error = "AI model overloaded or unavailable";
+    recordChatDiagnostic(diagEntry);
+
+    console.warn(`❌ [Express /api/gemini/chat] 503 Service Unavailable in ${duration}ms`);
     return res.status(503).json({
       error: "Dịch vụ Gia sư AI hiện đang quá tải hoặc tạm thời gián đoạn. Vui lòng bấm 'Thử lại' hoặc chuyển sang gợi ý có sẵn.",
       canUseFallback: true,
     });
   } catch (error: any) {
-    console.error("Gemini endpoint fatal error:", error);
+    const duration = Date.now() - startTime;
+    diagEntry.status = 500;
+    diagEntry.durationMs = duration;
+    diagEntry.source = "error";
+    diagEntry.error = error?.message || String(error);
+    recordChatDiagnostic(diagEntry);
+
+    console.error(`💥 [Express /api/gemini/chat Fatal Error] in ${duration}ms:`, error);
     return res.status(500).json({
       error: "Đã xảy ra lỗi khi kết nối với Gia sư AI. Vui lòng thử lại sau.",
     });
@@ -2460,6 +3208,8 @@ interface StoredUgotTask {
   type: "stage1_test" | "stage2_connect" | "stage3_run" | "stage3_stop";
   code: string;
   status: "pending_approval" | "queued" | "running" | "completed" | "error" | "cancelled" | "disconnected";
+  codeHash?: string;
+  approvedCodeHash?: string;
   approvedByTeacher?: boolean;
   reviewedBy?: string;
   reviewedAt?: string;
@@ -3228,6 +3978,14 @@ async function startServer() {
         activeWebListeners.get(deviceId)?.delete(ws);
       });
     }
+  });
+
+  // Explicit API 404 handler: Prevent ANY unmatched /api/* requests from falling through to Vite or index.html
+  app.all("/api/*", (req, res) => {
+    return res.status(404).json({
+      error: `API route không tồn tại: ${req.method} ${req.originalUrl || req.path}`,
+      status: 404,
+    });
   });
 
   if (process.env.NODE_ENV !== "production") {

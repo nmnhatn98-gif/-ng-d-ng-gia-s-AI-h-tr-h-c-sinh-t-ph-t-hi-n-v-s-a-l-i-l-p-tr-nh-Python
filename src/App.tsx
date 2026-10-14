@@ -279,17 +279,35 @@ export function App() {
           });
         }
 
-        // Load classes if present in firestore
-        const classesSnap = await getDocs(collection(db, "classes"));
-        if (!classesSnap.empty) {
-          const loadedClasses = classesSnap.docs
-            .map((d) => ({ id: d.id, ...d.data() } as ClassItem))
-            .filter((c) => !isMockClass(c));
-          setClasses(loadedClasses);
-          try {
-            localStorage.setItem("lms_classes", JSON.stringify(loadedClasses));
-          } catch (e) {
-            console.warn("Storage save classes error:", e);
+        // Load classes from primary server API first
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          const clsRes = await fetch("/api/classes?includeDeleted=true", {
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          if (clsRes.ok) {
+            const clsData = await clsRes.json();
+            if (Array.isArray(clsData.classes) && clsData.classes.length > 0) {
+              const loaded = clsData.classes.filter((c: any) => !isMockClass(c));
+              setClasses(loaded);
+              try {
+                localStorage.setItem("lms_classes", JSON.stringify(loaded));
+              } catch (e) {}
+            }
+          }
+        } catch (apiErr) {
+          console.warn("Server classes load fallback to Firestore:", apiErr);
+          const classesSnap = await getDocs(collection(db, "classes"));
+          if (!classesSnap.empty) {
+            const loadedClasses = classesSnap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as ClassItem))
+              .filter((c) => !isMockClass(c));
+            setClasses(loadedClasses);
+            try {
+              localStorage.setItem("lms_classes", JSON.stringify(loadedClasses));
+            } catch (e) {}
           }
         }
       } catch (err) {
@@ -530,44 +548,140 @@ export function App() {
     }
   };
 
-  // Add Class Handler
+  // Add Class Handler: Server API verification first, no swallowing error
   const handleAddClass = async (newClass: ClassItem) => {
-    setClasses((prev) => {
-      const updated = [newClass, ...prev];
-      try {
-        localStorage.setItem("lms_classes", JSON.stringify(updated));
-      } catch (e) {
-        console.warn("Storage save error:", e);
-      }
-      return updated;
-    });
-
     try {
-      await setDoc(doc(db, "classes", newClass.id), newClass);
-      showToast(`Đã tạo lớp mới thành công: ${newClass.name}`);
-    } catch (e) {
-      console.warn("Firestore save class fallback:", e);
-      showToast(`Đã tạo lớp ${newClass.name}!`);
+      const token = await auth.currentUser?.getIdToken();
+      const srvRes = await fetch("/api/classes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(newClass),
+      });
+
+      if (!srvRes.ok) {
+        const errData = await srvRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Máy chủ tạo lớp trả về lỗi (${srvRes.status})`);
+      }
+
+      const data = await srvRes.json();
+      const savedClass: ClassItem = data.class || newClass;
+
+      // Update state only after server confirmation
+      setClasses((prev) => {
+        const updated = [savedClass, ...prev.filter((c) => c.id !== savedClass.id)];
+        try {
+          localStorage.setItem("lms_classes", JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      // Secondary Firestore sync
+      try {
+        await setDoc(doc(db, "classes", savedClass.id), savedClass);
+      } catch (e) {
+        console.warn("Firestore save class notice:", e);
+      }
+
+      showToast(`🎉 Đã tạo lớp mới thành công: ${savedClass.name}`);
+    } catch (err: any) {
+      console.error("handleAddClass failed:", err);
+      throw err;
     }
   };
 
-  // Delete Class Handler
+  // Delete Class Handler: Soft Delete with server confirmation
   const handleDeleteClass = async (classId: string) => {
-    setClasses((prev) => {
-      const updated = prev.filter((c) => c.id !== classId);
-      try {
-        localStorage.setItem("lms_classes", JSON.stringify(updated));
-      } catch (e) {
-        console.warn("Storage save error:", e);
-      }
-      return updated;
-    });
-
     try {
-      await deleteDoc(doc(db, "classes", classId));
-      showToast("Đã xóa lớp học thành công.");
-    } catch (e) {
-      console.warn("Firestore delete class fallback:", e);
+      const token = await auth.currentUser?.getIdToken();
+      const srvRes = await fetch(`/api/classes/${classId}`, {
+        method: "DELETE",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!srvRes.ok) {
+        const errData = await srvRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Máy chủ xóa lớp trả về lỗi (${srvRes.status})`);
+      }
+
+      const data = await srvRes.json();
+
+      setClasses((prev) => {
+        const updated = prev.map((c) =>
+          c.id === classId
+            ? { ...c, status: "deleted" as const, deletedAt: new Date().toISOString() }
+            : c
+        );
+        try {
+          localStorage.setItem("lms_classes", JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      try {
+        await updateDoc(doc(db, "classes", classId), {
+          status: "deleted",
+          deletedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn("Firestore soft delete notice:", e);
+      }
+
+      showToast(data.message || "Đã chuyển lớp học vào mục Lớp đã xóa.");
+    } catch (err: any) {
+      console.error("handleDeleteClass failed:", err);
+      throw err;
+    }
+  };
+
+  // Restore Class Handler
+  const handleRestoreClass = async (classId: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const srvRes = await fetch(`/api/classes/${classId}/restore`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!srvRes.ok) {
+        const errData = await srvRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Máy chủ khôi phục lớp trả về lỗi (${srvRes.status})`);
+      }
+
+      const data = await srvRes.json();
+      const restored = data.class;
+
+      setClasses((prev) => {
+        const updated = prev.map((c) =>
+          c.id === classId
+            ? (restored ? restored : { ...c, status: "active" as const, deletedAt: undefined })
+            : c
+        );
+        try {
+          localStorage.setItem("lms_classes", JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      try {
+        await updateDoc(doc(db, "classes", classId), {
+          status: "active",
+          deletedAt: null,
+        });
+      } catch (e) {
+        console.warn("Firestore restore notice:", e);
+      }
+
+      showToast(`✅ Đã khôi phục lớp học thành công!`);
+    } catch (err: any) {
+      console.error("handleRestoreClass failed:", err);
+      throw err;
     }
   };
 
@@ -716,11 +830,16 @@ export function App() {
             </div>
           )}
           <div className="flex-1 min-h-0 flex flex-col">
-            <CodingModule
-              lesson={selectedLesson}
+            <PythonLabModule
               currentUser={activeUser}
+              initialLesson={selectedLesson}
+              availableLessons={lessons.filter(
+                (l) => l.moduleType === "coding" || l.language === "python" || l.subject?.toLowerCase().includes("python")
+              )}
+              submissions={submissions}
               onBack={() => setSelectedLesson(null)}
               onSubmitWork={handleSubmitWork}
+              onSelectLesson={(lesson) => setSelectedLesson(lesson)}
             />
           </div>
           <LoginModal
@@ -900,8 +1019,17 @@ export function App() {
           <div className="flex-1 min-h-0 w-full flex flex-col bg-slate-950 overflow-hidden">
             <PythonLabModule
               currentUser={activeUser}
-              onBack={() => setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons")}
+              initialLesson={selectedLesson}
+              availableLessons={lessons.filter(
+                (l) => l.moduleType === "coding" || l.language === "python" || l.subject?.toLowerCase().includes("python")
+              )}
+              submissions={submissions}
+              onBack={() => {
+                setSelectedLesson(null);
+                setActiveTab(activeUser.role === "teacher" ? "teacher-admin" : "lessons");
+              }}
               onSubmitWork={handleSubmitWork}
+              onSelectLesson={(lesson) => setSelectedLesson(lesson)}
             />
           </div>
         )}
@@ -964,6 +1092,7 @@ export function App() {
               onGradeSubmission={handleGradeSubmission}
               onAddClass={handleAddClass}
               onDeleteClass={handleDeleteClass}
+              onRestoreClass={handleRestoreClass}
               onSwitchToStudent={() => setActiveTab("lessons")}
               onOpenPythonLab={() => setActiveTab("python-lab")}
               onOpenHtmlLab={() => setActiveTab("html-lab")}

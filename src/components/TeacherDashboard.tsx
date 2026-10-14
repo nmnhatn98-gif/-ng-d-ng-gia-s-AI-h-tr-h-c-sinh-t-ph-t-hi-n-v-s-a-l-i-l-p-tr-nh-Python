@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { 
   Lesson, 
   Submission, 
@@ -42,14 +42,16 @@ import {
   Save,
   ShieldCheck,
   HardDrive,
-  Cpu
+  Cpu,
+  Loader2,
+  Users
 } from "lucide-react";
 import { ExamCreationSystem } from "./ExamCreationSystem";
 import { StudentAccountManager } from "./StudentAccountManager";
 import { CreateClassModal } from "./CreateClassModal";
 import { CreateAssignmentModal } from "./CreateAssignmentModal";
 import { TeacherUgotManager } from "./TeacherUgotManager";
-import { getStoredStudents } from "../data/studentService";
+import { getStoredStudents, subscribeStudentsUpdate } from "../data/studentService";
 import { auth } from "../firebase";
 
 interface TeacherDashboardProps {
@@ -62,6 +64,7 @@ interface TeacherDashboardProps {
   onGradeSubmission: (submissionId: string, rubric: RubricCriteria, score: number, feedback: string) => Promise<void>;
   onAddClass?: (newClass: ClassItem) => Promise<void> | void;
   onDeleteClass?: (classId: string) => Promise<void> | void;
+  onRestoreClass?: (classId: string) => Promise<void> | void;
   onSwitchToStudent?: () => void;
   onLogout?: () => void;
   onOpenLogin?: (role?: "student" | "teacher") => void;
@@ -81,6 +84,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onGradeSubmission,
   onAddClass,
   onDeleteClass,
+  onRestoreClass,
   onSwitchToStudent,
   onLogout,
   onOpenPythonLab,
@@ -127,6 +131,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [isCreateClassOpen, setIsCreateClassOpen] = useState(false);
   const [classSearch, setClassSearch] = useState("");
   const [viewingClassDetail, setViewingClassDetail] = useState<ClassItem | null>(null);
+  const [classViewTab, setClassViewTab] = useState<"active" | "deleted">("active");
+  const [classToDelete, setClassToDelete] = useState<ClassItem | null>(null);
+  const [isDeletingClass, setIsDeletingClass] = useState<boolean>(false);
+  const [deleteClassError, setDeleteClassError] = useState<string | null>(null);
+  const [accountCreatorClassId, setAccountCreatorClassId] = useState<string | null>(null);
+  const [isRestoringClassId, setIsRestoringClassId] = useState<string | null>(null);
 
   // Reports States
   const [reportAssignmentFilter, setReportAssignmentFilter] = useState<string>("all");
@@ -140,8 +150,52 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // Copy status helper
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Real students count from storage
-  const storedStudents = useMemo(() => getStoredStudents(), []);
+  // Real students count from storage with live subscription
+  const [storedStudents, setStoredStudents] = useState<UserProfile[]>(() => getStoredStudents());
+  useEffect(() => {
+    const unsub = subscribeStudentsUpdate((updated) => {
+      setStoredStudents(updated);
+    });
+    return () => unsub();
+  }, []);
+
+  const activeClasses = useMemo(() => {
+    return classes.filter((c) => c.status !== "deleted");
+  }, [classes]);
+
+  const deletedClasses = useMemo(() => {
+    return classes.filter((c) => c.status === "deleted");
+  }, [classes]);
+
+  const handleConfirmDeleteClass = async () => {
+    if (!classToDelete || !onDeleteClass) return;
+    setIsDeletingClass(true);
+    setDeleteClassError(null);
+    try {
+      await onDeleteClass(classToDelete.id);
+      if (viewingClassDetail?.id === classToDelete.id) {
+        setViewingClassDetail(null);
+      }
+      setClassToDelete(null);
+    } catch (err: any) {
+      console.error("Delete class error:", err);
+      setDeleteClassError(err?.message || "Không thể xóa lớp học trên máy chủ.");
+    } finally {
+      setIsDeletingClass(false);
+    }
+  };
+
+  const handleExecuteRestoreClass = async (classId: string) => {
+    if (!onRestoreClass) return;
+    setIsRestoringClassId(classId);
+    try {
+      await onRestoreClass(classId);
+    } catch (err: any) {
+      alert("Lỗi khi khôi phục lớp: " + (err.message || err));
+    } finally {
+      setIsRestoringClassId(null);
+    }
+  };
 
   // Filter Submissions based on Class, Assignment, Status, Search
   const filteredSubmissions = useMemo(() => {
@@ -478,6 +532,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     settings: {
       title: "Cài đặt & Dữ liệu",
       subtitle: "Quản lý kết nối đám mây, sao lưu và an toàn hệ thống",
+    },
+    "ugot-bridge": {
+      title: "Cầu nối Robot UGOT",
+      subtitle: "Phê duyệt quyền chạy robot, giám sát an toàn và quản lý thiết bị phòng Lab",
     },
   };
 
@@ -958,20 +1016,65 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             {/* ============================================================== */}
             {activeNav === "classes" && (
               <div className="space-y-5">
-                {/* Class Toolbar */}
+                {/* Class Toolbar & Tabs */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-                  <div className="relative flex-1 max-w-md">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Tìm kiếm lớp học hoặc học sinh..."
-                      value={classSearch}
-                      onChange={(e) => setClassSearch(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                  <div className="flex items-center gap-2">
+                    {/* Active vs Deleted tabs */}
+                    <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClassViewTab("active");
+                          setViewingClassDetail(null);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg transition-all ${
+                          classViewTab === "active"
+                            ? "bg-white text-slate-900 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        Lớp đang dạy ({activeClasses.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClassViewTab("deleted");
+                          setViewingClassDetail(null);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                          classViewTab === "deleted"
+                            ? "bg-white text-rose-700 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Lớp đã xóa ({deletedClasses.length})</span>
+                      </button>
+                    </div>
+
+                    <div className="relative flex-1 min-w-[180px]">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Tìm kiếm lớp học..."
+                        value={classSearch}
+                        onChange={(e) => setClassSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAccountCreatorClassId(activeClasses[0]?.id || "general")}
+                      className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+                      title="Mở bảng tạo tài khoản học sinh"
+                    >
+                      <Users className="w-4 h-4 text-blue-600" />
+                      <span>Tạo tài khoản học sinh</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => setIsCreateClassOpen(true)}
@@ -983,103 +1086,336 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 </div>
 
-                {/* Class Detail View (When a single class is focused) */}
+                {/* VIEW 2A: CLASS DETAIL VIEW */}
                 {viewingClassDetail ? (
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-5">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                      <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                      <div className="flex items-start gap-3">
                         <button
                           type="button"
                           onClick={() => setViewingClassDetail(null)}
-                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs"
+                          className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs mt-0.5"
                           title="Quay lại danh sách lớp"
                         >
                           <ArrowLeft className="w-4 h-4" />
                         </button>
                         <div>
-                          <h2 className="text-base font-bold text-slate-900">{viewingClassDetail.name}</h2>
-                          <p className="text-xs text-slate-500">{viewingClassDetail.description || "Lớp học Tin học & STEM"}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h2 className="text-base sm:text-lg font-black text-slate-900">{viewingClassDetail.name}</h2>
+                            <span className="px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-bold">
+                              {viewingClassDetail.gradeNumber ? `Khối ${viewingClassDetail.gradeNumber}` : "Lớp học"}
+                            </span>
+                            {viewingClassDetail.schoolYear && (
+                              <span className="text-xs text-slate-400 font-medium">
+                                Năm học: {viewingClassDetail.schoolYear}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {viewingClassDetail.description || "Lớp học Tin học & STEM"}
+                            {viewingClassDetail.teacherName ? ` • Giáo viên: ${viewingClassDetail.teacherName}` : ""}
+                            {viewingClassDetail.room ? ` • Phòng: ${viewingClassDetail.room}` : ""}
+                          </p>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedClassId(viewingClassDetail.name);
-                          setActiveNav("grading");
-                        }}
-                        className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold"
-                      >
-                        Chấm bài lớp này →
-                      </button>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAccountCreatorClassId(viewingClassDetail.id)}
+                          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Tạo tài khoản học sinh</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedClassId(viewingClassDetail.name);
+                            setActiveNav("grading");
+                          }}
+                          className="px-3 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold transition-colors"
+                        >
+                          Chấm bài lớp này →
+                        </button>
+
+                        {currentUser?.role === "teacher" &&
+                          (!viewingClassDetail.ownerUid || viewingClassDetail.ownerUid === currentUser.uid) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteClassError(null);
+                                setClassToDelete(viewingClassDetail);
+                              }}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl text-xs transition-colors"
+                              title="Xóa lớp học"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                      </div>
                     </div>
 
                     {/* Students in this Class */}
                     <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-3">Danh sách học sinh trong lớp</h3>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                          <Users className="w-4 h-4 text-blue-600" />
+                          <span>Danh sách học sinh trong lớp ({storedStudents.filter(
+                            (s) => s.classId === viewingClassDetail.id || (!s.classId && s.classGrade === viewingClassDetail.name)
+                          ).length} em)</span>
+                        </h3>
+
+                        <button
+                          type="button"
+                          onClick={() => setAccountCreatorClassId(viewingClassDetail.id)}
+                          className="text-xs text-blue-600 font-bold hover:underline"
+                        >
+                          + Thêm học sinh vào lớp này
+                        </button>
+                      </div>
+
                       <div className="overflow-x-auto border border-slate-100 rounded-xl">
                         <table className="w-full text-left text-xs sm:text-sm">
                           <thead className="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase">
                             <tr>
                               <th className="py-2.5 px-3">Mã học sinh</th>
                               <th className="py-2.5 px-3">Họ và tên</th>
-                              <th className="py-2.5 px-3">Email</th>
+                              <th className="py-2.5 px-3">Email đăng nhập</th>
                               <th className="py-2.5 px-3">Bài đã nộp</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {storedStudents
-                              .filter((s) => s.classGrade === viewingClassDetail.name || s.classGrade === viewingClassDetail.id)
+                              .filter(
+                                (s) =>
+                                  s.classId === viewingClassDetail.id ||
+                                  (!s.classId && s.classGrade === viewingClassDetail.name)
+                              )
                               .map((st) => {
                                 const subsCount = submissions.filter((sub) => sub.studentId === st.uid).length;
                                 return (
                                   <tr key={st.uid} className="hover:bg-slate-50">
                                     <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{st.studentCode || st.uid}</td>
-                                    <td className="py-2.5 px-3 font-medium text-slate-900">{st.displayName}</td>
-                                    <td className="py-2.5 px-3 text-slate-500 text-xs">{st.email}</td>
+                                    <td className="py-2.5 px-3 font-semibold text-slate-900">{st.displayName}</td>
+                                    <td className="py-2.5 px-3 text-slate-500 text-xs font-mono">{st.email}</td>
                                     <td className="py-2.5 px-3 text-slate-700">{subsCount} bài</td>
                                   </tr>
                                 );
                               })}
+                            {storedStudents.filter(
+                              (s) =>
+                                s.classId === viewingClassDetail.id ||
+                                (!s.classId && s.classGrade === viewingClassDetail.name)
+                            ).length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="py-8 text-center text-slate-400">
+                                  <p className="font-semibold text-xs">Lớp học này chưa có học sinh nào.</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAccountCreatorClassId(viewingClassDetail.id)}
+                                    className="mt-2 text-xs text-blue-600 font-bold hover:underline"
+                                  >
+                                    Bấm vào đây để tạo danh sách tài khoản học sinh ngay →
+                                  </button>
+                                </td>
+                              </tr>
+                            )}
                           </tbody>
                         </table>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  /* Class Grid List */
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {classes
-                      .filter((c) => !classSearch.trim() || c.name.toLowerCase().includes(classSearch.toLowerCase()))
-                      .map((cls) => {
-                        const classStudents = storedStudents.filter(
-                          (st) => st.classGrade === cls.name || st.classGrade === cls.id
-                        );
-                        return (
-                          <div
-                            key={cls.id}
-                            className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-blue-300 transition-all space-y-3 cursor-pointer"
-                            onClick={() => setViewingClassDetail(cls)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700">
-                                {cls.gradeNumber ? `Khối ${cls.gradeNumber}` : "Lớp học"}
-                              </span>
-                              <span className="text-xs text-slate-400 font-medium">{classStudents.length} học sinh</span>
-                            </div>
+                ) : classViewTab === "deleted" ? (
+                  /* VIEW 2B: DELETED CLASSES (TRASH) */
+                  <div className="space-y-4">
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Trash2 className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>
+                          <strong>Mục lưu trữ lớp đã xóa:</strong> Các lớp trong mục này đã được ẩn khỏi danh sách giảng dạy.
+                          Học sinh và bài làm vẫn an toàn tuyệt đối và có thể khôi phục lại bất kỳ lúc nào.
+                        </span>
+                      </div>
+                    </div>
 
-                            <div>
-                              <h3 className="font-bold text-slate-900 text-base">{cls.name}</h3>
-                              <p className="text-xs text-slate-500 mt-1 line-clamp-2">{cls.description || "Chưa có mô tả."}</p>
-                            </div>
+                    {deletedClasses.length === 0 ? (
+                      <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-2">
+                        <School className="w-8 h-8 mx-auto text-slate-300" />
+                        <p className="text-sm font-semibold text-slate-600">Thùng rác trống</p>
+                        <p className="text-xs">Chưa có lớp học nào bị chuyển vào mục đã xóa.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {deletedClasses
+                          .filter(
+                            (c) =>
+                              !classSearch.trim() ||
+                              c.name.toLowerCase().includes(classSearch.toLowerCase())
+                          )
+                          .map((cls) => {
+                            const enrolledCount = storedStudents.filter(
+                              (st) => st.classId === cls.id || (!st.classId && st.classGrade === cls.name)
+                            ).length;
+                            return (
+                              <div
+                                key={cls.id}
+                                className="bg-white p-5 rounded-2xl border border-rose-200/80 shadow-xs space-y-3 flex flex-col justify-between"
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700">
+                                      {cls.gradeNumber ? `Khối ${cls.gradeNumber}` : "Lớp đã xóa"}
+                                    </span>
+                                    <span className="text-xs text-slate-400 font-medium">
+                                      {enrolledCount} học sinh
+                                    </span>
+                                  </div>
 
-                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-blue-600">
-                              <span>Xem chi tiết học sinh</span>
-                              <ChevronRight className="w-4 h-4" />
-                            </div>
-                          </div>
-                        );
-                      })}
+                                  <div className="mt-2.5">
+                                    <h3 className="font-bold text-slate-800 text-base leading-snug line-through text-slate-500">
+                                      {cls.name}
+                                    </h3>
+                                    <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                                      {cls.description || "Lớp học đã bị xóa."}
+                                    </p>
+                                    {cls.deletedAt && (
+                                      <p className="text-[11px] text-rose-500 font-medium mt-1">
+                                        Đã xóa lúc: {new Date(cls.deletedAt).toLocaleDateString("vi-VN")}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="pt-3 border-t border-slate-100">
+                                  <button
+                                    type="button"
+                                    disabled={isRestoringClassId === cls.id}
+                                    onClick={() => handleExecuteRestoreClass(cls.id)}
+                                    className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
+                                  >
+                                    {isRestoringClassId === cls.id ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Đang khôi phục...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RefreshCw className="w-3.5 h-3.5" />
+                                        <span>Khôi phục lớp học này</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                   </div>
+                ) : (
+                  /* VIEW 2C: ACTIVE CLASSES GRID */
+                  activeClasses.length === 0 ? (
+                    <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-3">
+                      <School className="w-10 h-10 mx-auto text-blue-400" />
+                      <div>
+                        <p className="text-base font-bold text-slate-800">Chưa có lớp học nào</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Hãy tạo lớp học đầu tiên bằng tên riêng của bạn (VD: "10A3" hoặc "Tin học chiều thứ Ba").
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsCreateClassOpen(true)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Tạo Lớp Học Ngay</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {activeClasses
+                        .filter(
+                          (c) =>
+                            !classSearch.trim() ||
+                            c.name.toLowerCase().includes(classSearch.toLowerCase())
+                        )
+                        .map((cls) => {
+                          const classStudents = storedStudents.filter(
+                            (st) => st.classId === cls.id || (!st.classId && st.classGrade === cls.name)
+                          );
+                          const isOwner =
+                            currentUser?.role === "teacher" &&
+                            (!cls.ownerUid || cls.ownerUid === currentUser.uid);
+
+                          return (
+                            <div
+                              key={cls.id}
+                              className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-blue-300 transition-all space-y-3 flex flex-col justify-between"
+                            >
+                              <div>
+                                <div className="flex items-center justify-between">
+                                  <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700">
+                                    {cls.gradeNumber ? `Khối ${cls.gradeNumber}` : "Lớp học"}
+                                  </span>
+                                  <span className="text-xs text-slate-500 font-medium">
+                                    {classStudents.length} học sinh
+                                  </span>
+                                </div>
+
+                                <div className="mt-2.5">
+                                  <h3 className="font-bold text-slate-900 text-base leading-snug">
+                                    {cls.name}
+                                  </h3>
+                                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                                    {cls.description || "Chưa có mô tả."}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* 3 Action Buttons on each Class Card */}
+                              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingClassDetail(cls)}
+                                  className="flex-1 py-1.5 px-2 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                                  title="Xem danh sách học sinh của lớp này"
+                                >
+                                  <Users className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>Học sinh ({classStudents.length})</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setAccountCreatorClassId(cls.id)}
+                                  className="flex-1 py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                                  title="Tạo tài khoản học sinh cho lớp này"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Tạo tài khoản</span>
+                                </button>
+
+                                {isOwner && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDeleteClassError(null);
+                                      setClassToDelete(cls);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl text-xs transition-colors"
+                                    title="Xóa lớp học (chuyển vào mục Đã xóa)"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )
                 )}
               </div>
             )}
@@ -2084,11 +2420,98 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {/* Class Creation Modal */}
       <CreateClassModal
         isOpen={isCreateClassOpen}
+        currentUser={currentUser}
         onClose={() => setIsCreateClassOpen(false)}
         onSaveClass={async (newCls) => {
           if (onAddClass) await onAddClass(newCls);
         }}
       />
+
+      {/* Student Account Creator Modal */}
+      {accountCreatorClassId && (
+        <StudentAccountManager
+          classes={classes}
+          currentUser={currentUser}
+          initialClassId={accountCreatorClassId}
+          isOpenModal={true}
+          onCloseModal={() => setAccountCreatorClassId(null)}
+          onSuccessCreated={() => {
+            setStoredStudents(getStoredStudents());
+          }}
+        />
+      )}
+
+      {/* Soft Delete Class Confirmation Modal */}
+      {classToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center font-bold shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xác nhận chuyển lớp vào mục Đã xóa</h3>
+                <p className="text-xs text-slate-500">Thao tác này có thể khôi phục lại bất kỳ lúc nào</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200/80 space-y-2">
+              <div className="text-xs font-bold text-amber-900">
+                Lớp học: <span className="text-slate-900 font-extrabold text-sm">{classToDelete.name}</span>
+              </div>
+              <div className="text-xs text-amber-800">
+                Sĩ số hiện tại: <strong>{storedStudents.filter(
+                  (s) => s.classId === classToDelete.id || (!s.classId && s.classGrade === classToDelete.name)
+                ).length} học sinh</strong>
+              </div>
+              <div className="text-xs text-amber-900/90 leading-relaxed pt-2 border-t border-amber-200">
+                <strong>Phạm vi ảnh hưởng:</strong>
+                <ul className="list-disc list-inside mt-1 space-y-0.5 text-[11px] text-amber-800">
+                  <li>Lớp sẽ bị ẩn khỏi danh sách lớp đang dạy và các bộ chọn giao bài tập.</li>
+                  <li><strong>KHÔNG xóa</strong> tài khoản đăng nhập của học sinh.</li>
+                  <li><strong>KHÔNG xóa</strong> bài nộp, điểm số hay tiến trình học tập.</li>
+                  <li>Giáo viên có thể mở thẻ <em>"Lớp đã xóa"</em> để xem và bấm khôi phục bất cứ lúc nào.</li>
+                </ul>
+              </div>
+            </div>
+
+            {deleteClassError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+                {deleteClassError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingClass}
+                onClick={() => {
+                  setClassToDelete(null);
+                  setDeleteClassError(null);
+                }}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingClass}
+                onClick={handleConfirmDeleteClass}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors disabled:opacity-60"
+              >
+                {isDeletingClass ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang xử lý xóa...</span>
+                  </>
+                ) : (
+                  <span>Xác nhận xóa lớp</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* System Restore Confirmation Modal */}
       {restoreConfirmOpen && (

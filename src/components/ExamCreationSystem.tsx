@@ -458,8 +458,13 @@ D. Lặp vô hạn không dừng
             isImage: true,
           }),
         });
+
+        const contentType = aiRes.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`Máy chủ trả về định dạng không hợp lệ (${aiRes.status})`);
+        }
         const aiData = await aiRes.json();
-        if (aiData.questions && aiData.questions.length > 0) {
+        if (aiRes.ok && aiData.questions && aiData.questions.length > 0) {
           setQuestions(aiData.questions);
           setExamTitle(aiData.examTitle || file.name.replace(/\.[^/.]+$/, ""));
           setViewMode("editor");
@@ -552,8 +557,12 @@ D. Lặp vô hạn không dừng
         }),
       });
 
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Máy chủ trả về định dạng không hợp lệ (${res.status})`);
+      }
       const data = await res.json();
-      if (data.questions && data.questions.length > 0) {
+      if (res.ok && data.questions && data.questions.length > 0) {
         setQuestions(data.questions);
         if (data.examTitle) setExamTitle(data.examTitle);
         setViewMode("editor");
@@ -661,13 +670,18 @@ D. Lặp vô hạn không dừng
           matrix: matrixTopics,
         }),
       });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Máy chủ trả về định dạng không hợp lệ (${res.status})`);
+      }
       const data = await res.json();
-      if (data.questions && data.questions.length > 0) {
+      if (res.ok && data.questions && data.questions.length > 0) {
         setQuestions(data.questions);
         if (data.examTitle) setExamTitle(data.examTitle);
         setViewMode("editor");
       } else {
-        alert("Không thể sinh đề từ ma trận, vui lòng thử lại!");
+        alert(data?.error || "Không thể sinh đề từ ma trận, vui lòng thử lại!");
       }
     } catch (err: any) {
       alert("Lỗi kết nối tạo ma trận: " + err.message);

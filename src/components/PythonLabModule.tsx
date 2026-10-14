@@ -1,586 +1,482 @@
 import React, { useState, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
-import { 
-  UserProfile, 
-  ChatMessage, 
-  Submission, 
-  DebugSession, 
-  DebugRunItem, 
-  AiHintItem, 
-  StudentReflection 
+import {
+  UserProfile,
+  ChatMessage,
+  Submission,
+  Lesson,
+  DebugSession,
+  DebugRunItem,
+  AiHintItem,
+  StudentReflection,
 } from "../types";
 import { executeCodeHybrid, PYTHON_RUNTIME_COMPATIBILITY_INFO } from "../lib/pythonRunner";
 import { UgotPracticePanel } from "./UgotPracticePanel";
-import { 
-  Play, 
-  RotateCcw, 
-  Download, 
-  Copy, 
-  Check, 
-  Send, 
-  Sparkles, 
-  Terminal, 
-  Code2, 
-  Bot, 
-  FileCode, 
-  Trash2, 
-  ArrowLeft, 
-  BookOpen, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle, 
-  Sliders, 
+import {
+  Play,
+  RotateCcw,
+  Check,
+  Send,
+  Sparkles,
+  Terminal,
+  Code2,
+  Bot,
+  FileCode,
+  ArrowLeft,
+  BookOpen,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
   HelpCircle,
-  Zap,
   Save,
-  Info,
-  RefreshCw,
-  MessageSquare,
-  ListChecks,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Copy,
+  Layers,
+  Calendar,
+  Sliders,
   History,
-  ShieldAlert,
-  ArrowRight,
-  X
+  Info,
+  Maximize2,
+  Minimize2,
+  Cpu,
+  RefreshCw,
+  FolderOpen,
 } from "lucide-react";
 
-interface PythonLabModuleProps {
+export interface PythonLabModuleProps {
   currentUser: UserProfile;
+  initialLesson?: Lesson | null;
+  availableLessons?: Lesson[];
+  submissions?: Submission[];
   onBack?: () => void;
   onSubmitWork?: (submissionData: Partial<Submission>) => Promise<void>;
+  onSelectLesson?: (lesson: Lesson | null) => void;
 }
 
-// Built-in starter templates for Python learners
-const PYTHON_TEMPLATES: Record<string, {
-  name: string;
-  category: string;
-  description: string;
-  code: string;
-  sampleInput: string;
-}> = {
-  hello_world: {
-    name: "1. Xin chào & Nhập xuất cơ bản",
+// Built-in starter reference templates for curriculum
+const REFERENCE_PYTHON_TOPICS = [
+  {
+    id: "ref_input_output",
+    title: "1. Nhập xuất cơ bản & f-string",
     category: "Cơ bản",
-    description: "Làm quen hàm print(), input() và định dạng chuỗi f-string.",
-    code: `# Nhập tên học sinh từ bàn phím
-ten = input("Nhập họ tên của bạn: ")
-lop = input("Nhập lớp học của bạn: ")
-
-print("-" * 35)
-print(f"Xin chào {ten} đến với STEM Tin Học!")
-print(f"Chúc bạn học tập thật tốt tại {lop}.")
-print("-" * 35)
-`,
+    code: `# Nhập tên và lớp từ bàn phím\nten = input("Nhập họ tên của bạn: ")\nlop = input("Nhập lớp học của bạn: ")\n\nprint("-" * 35)\nprint(f"Xin chào {ten} đến với Tin Học & STEM!")\nprint(f"Chúc bạn học tập thật tốt tại {lop}.")\nprint("-" * 35)\n`,
     sampleInput: "Nguyễn Văn An\nLớp 10A1",
+    description: "Làm quen với các hàm cơ bản print(), input() và định dạng chuỗi f-string.",
   },
-  arithmetic_gdpt: {
-    name: "2. Phép toán số học (GDPT 2018)",
-    category: "GDPT 2018",
-    description: "Nhập 2 số a, b và tính tổng, hiệu, tích, chia nguyên //, chia dư %.",
-    code: `# Nhập vào 2 số nguyên a và b trên cùng 1 dòng
-print("Mời nhập 2 số nguyên a và b (cách nhau bởi dấu cách):")
-a, b = map(int, input().split())
-
-print(f"Tổng a + b: {a + b}")
-print(f"Hiệu a - b: {a - b}")
-print(f"Tích a * b: {a * b}")
-print(f"Thương nguyên a // b: {a // b}")
-print(f"Số dư a % b: {a % b}")
-print(f"Lũy thừa a ^ b: {a ** b}")
-`,
+  {
+    id: "ref_math_ops",
+    title: "2. Phép toán số học (GDPT 2018)",
+    category: "Số học",
+    code: `# Nhập vào 2 số nguyên a và b cách nhau bởi dấu cách\na, b = map(int, input("Nhập 2 số a và b: ").split())\n\nprint(f"Tổng a + b: {a + b}")\nprint(f"Hiệu a - b: {a - b}")\nprint(f"Tích a * b: {a * b}")\nprint(f"Thương nguyên a // b: {a // b}")\nprint(f"Số dư a % b: {a % b}")\nprint(f"Lũy thừa a ** b: {a ** b}")\n`,
     sampleInput: "15 4",
+    description: "Thực hành các phép toán cộng, trừ, nhân, chia nguyên, chia dư và lũy thừa.",
   },
-  if_else_branches: {
-    name: "3. Cấu trúc rẽ nhánh if-elif-else",
-    category: "GDPT 2018",
-    description: "Kiểm tra số chẵn lẻ và xếp loại học lực học sinh.",
-    code: `# Nhập điểm trung bình môn Tin học
-diem = float(input("Nhập điểm trung bình môn Tin học (0 - 10): "))
-
-if diem < 0 or diem > 10:
-    print("Điểm không hợp lệ!")
-elif diem >= 8.0:
-    print(f"Điểm {diem}: Xếp loại GIỎI / XUẤT SẮC 🌟")
-elif diem >= 6.5:
-    print(f"Điểm {diem}: Xếp loại KHÁ 👍")
-elif diem >= 5.0:
-    print(f"Điểm {diem}: Xếp loại TRUNG BÌNH 🎯")
-else:
-    print(f"Điểm {diem}: Cần nỗ lực ôn tập thêm 💡")
-`,
+  {
+    id: "ref_if_else",
+    title: "3. Cấu trúc rẽ nhánh if - elif - else",
+    category: "Điều khiển",
+    code: `# Xếp loại học lực theo điểm số\ndiem = float(input("Nhập điểm môn Tin học (0 - 10): "))\n\nif diem < 0 or diem > 10:\n    print("Điểm không hợp lệ!")\nelif diem >= 8.0:\n    print(f"Điểm {diem}: Xếp loại GIỎI / XUẤT SẮC 🌟")\nelif diem >= 6.5:\n    print(f"Điểm {diem}: Xếp loại KHÁ 👍")\nelif diem >= 5.0:\n    print(f"Điểm {diem}: Xếp loại TRUNG BÌNH 🎯")\nelse:\n    print(f"Điểm {diem}: Cần cố gắng ôn tập thêm 💡")\n`,
     sampleInput: "8.5",
+    description: "Cấu trúc rẽ nhánh nhiều trường hợp bằng lệnh if-elif-else.",
   },
-  loops_for_range: {
-    name: "4. Vòng lặp for & hàm range()",
-    category: "GDPT 2018",
-    description: "Tính tổng từ 1 đến N và in bảng cửu chương số K.",
-    code: `# Nhập số nguyên N
-n = int(input("Nhập số N để tính tổng và in bảng nhân: "))
-
-# Tính tổng 1 + 2 + ... + N
-tong = 0
-for i in range(1, n + 1):
-    tong += i
-
-print(f"Tổng các số từ 1 đến {n} là: {tong}")
-
-# In bảng nhân cho N
-print(f"--- BẢNG NHÂN {n} ---")
-for i in range(1, 11):
-    print(f"{n} x {i:2d} = {n * i:2d}")
-`,
+  {
+    id: "ref_for_loop",
+    title: "4. Vòng lặp for & hàm range()",
+    category: "Vòng lặp",
+    code: `# Tính tổng từ 1 đến N và in bảng cửu chương N\nn = int(input("Nhập số nguyên N: "))\n\ntong = 0\nfor i in range(1, n + 1):\n    tong += i\n\nprint(f"Tổng các số từ 1 đến {n} là: {tong}")\n\nprint(f"--- BẢNG NHÂN {n} ---")\nfor i in range(1, 11):\n    print(f"{n} x {i:2d} = {n * i:2d}")\n`,
     sampleInput: "7",
+    description: "Lặp với số lần biết trước bằng for và hàm range(start, stop, step).",
   },
-  while_euclid_gcd: {
-    name: "5. Vòng lặp while & Thuật toán Euclid",
+  {
+    id: "ref_while_gcd",
+    title: "5. Vòng lặp while & Thuật toán Euclid",
     category: "Thuật toán",
-    description: "Tìm Ước chung lớn nhất (UCLN) và Bội chung nhỏ nhất (BCNN).",
-    code: `# Nhập 2 số nguyên dương
-a, b = map(int, input("Nhập 2 số nguyên a và b: ").split())
-orig_a, orig_b = a, b
-
-# Thuật toán Euclid với vòng lặp while
-while b != 0:
-    r = a % b
-    a = b
-    b = r
-
-ucln = a
-bcnn = (orig_a * orig_b) // ucln
-
-print(f"UCLN({orig_a}, {orig_b}) = {ucln}")
-print(f"BCNN({orig_a}, {orig_b}) = {bcnn}")
-`,
+    code: `# Tìm Ước chung lớn nhất (UCLN) của 2 số a, b\na, b = map(int, input("Nhập 2 số nguyên a b: ").split())\norig_a, orig_b = a, b\n\nwhile b != 0:\n    r = a % b\n    a = b\n    b = r\n\nucln = a\nbcnn = (orig_a * orig_b) // ucln\nprint(f"UCLN({orig_a}, {orig_b}) = {ucln}")\nprint(f"BCNN({orig_a}, {orig_b}) = {bcnn}")\n`,
     sampleInput: "24 36",
+    description: "Vòng lặp while kiểm tra điều kiện lặp cho các thuật toán cổ điển.",
   },
-  list_operations: {
-    name: "6. Kiểu Danh sách (List) & Thống kê",
-    category: "Cấu trúc dữ liệu",
-    description: "Khởi tạo danh sách, tìm Max, Min, sắp xếp và tính trung bình.",
-    code: `# Nhập danh sách các số nguyên cách nhau bởi dấu cách
-print("Nhập các số trong danh sách (cách nhau bởi dấu cách):")
-arr = list(map(int, input().split()))
-
-print(f"Danh sách ban đầu: {arr}")
-print(f"Số lượng phần tử: {len(arr)}")
-print(f"Giá trị lớn nhất (Max): {max(arr)}")
-print(f"Giá trị nhỏ nhất (Min): {min(arr)}")
-print(f"Tổng các phần tử: {sum(arr)}")
-print(f"Trung bình cộng: {sum(arr) / len(arr):.2f}")
-
-# Sắp xếp tăng dần
-arr_tang = sorted(arr)
-print(f"Danh sách sau khi sắp xếp tăng dần: {arr_tang}")
-`,
+  {
+    id: "ref_list_stats",
+    title: "6. Kiểu Danh sách (List) & Thống kê",
+    category: "Dữ liệu",
+    code: `# Xử lý danh sách số nguyên\nnumbers = list(map(int, input("Nhập các số cách nhau bởi dấu cách: ").split()))\n\nprint(f"Danh sách: {numbers}")\nprint(f"Số lượng phần tử: {len(numbers)}")\nprint(f"Giá trị lớn nhất (Max): {max(numbers)}")\nprint(f"Giá trị nhỏ nhất (Min): {min(numbers)}")\nprint(f"Tổng các số: {sum(numbers)}")\nprint(f"Trung bình cộng: {sum(numbers) / len(numbers):.2f}")\n`,
     sampleInput: "12 45 7 89 23 45 10",
+    description: "Các thao tác với mảng/danh sách: len(), max(), min(), sum(), sorted().",
   },
-  string_processing: {
-    name: "7. Xử lý Xâu ký tự (String)",
-    category: "GDPT 2018",
-    description: "Đếm từ, chuẩn hóa xâu chữ hoa/thường và kiểm tra xâu đối xứng.",
-    code: `# Nhập xâu ký tự
-s = input("Nhập vào một câu hoặc xâu ký tự: ").strip()
+];
 
-print(f"Độ dài xâu: {len(s)} ký tự")
-print(f"Viết hoa toàn bộ: {s.upper()}")
-print(f"Viết thường toàn bộ: {s.lower()}")
-print(f"Số lượng từ trong câu: {len(s.split())} từ")
-
-# Kiểm tra xâu đối xứng (bỏ qua khoảng trắng và viết thường)
-cleaned = s.lower().replace(" ", "")
-if cleaned == cleaned[::-1]:
-    print("=> Đây là XÂU ĐỐI XỨNG (Palindrome)!")
-else:
-    print("=> Không phải xâu đối xứng.")
-`,
-    sampleInput: "Madam In Eden Im Adam",
+// Syntax Cheatsheet categories
+const SYNTAX_CHEATSHEET = [
+  {
+    category: "1. Nhập / Xuất dữ liệu",
+    items: [
+      {
+        title: "In ra màn hình (print)",
+        code: `print("Xin chào học sinh!")\nprint("Giá trị a =", a)\nprint(f"Kết quả: {x + y}")  # f-string`,
+        note: "Dùng f-string f\"{biến}\" để chèn giá trị trực tiếp vào chuỗi.",
+      },
+      {
+        title: "Nhập dữ liệu (input)",
+        code: `# Nhập chuỗi:\nten = input("Nhập tên: ")\n# Nhập số nguyên:\nn = int(input("Nhập số n: "))\n# Nhập số thực:\nx = float(input("Nhập số thực x: "))\n# Nhập nhiều số trên 1 dòng:\na, b = map(int, input().split())`,
+        note: "Lệnh input() luôn trả về chuỗi str, cần dùng int() hoặc float() để ép kiểu.",
+      },
+    ],
   },
-  function_def: {
-    name: "8. Xây dựng hàm (def) & Số nguyên tố",
-    category: "Chương trình con",
-    description: "Định nghĩa hàm kiểm tra số nguyên tố và tìm các số nguyên tố nhỏ hơn N.",
-    code: `import math
-
-# Hàm kiểm tra số nguyên tố
-def la_so_nguyen_to(k):
-    if k < 2:
-        return False
-    for i in range(2, int(math.isqrt(k)) + 1):
-        if k % i == 0:
-            return False
-    return True
-
-# Nhập N và in ra tất cả các số nguyên tố <= N
-n = int(input("Nhập số nguyên N: "))
-cac_snt = [x for x in range(2, n + 1) if la_so_nguyen_to(x)]
-
-print(f"Các số nguyên tố từ 2 đến {n}:")
-print(cac_snt)
-print(f"Tổng cộng có {len(cac_snt)} số nguyên tố.")
-`,
-    sampleInput: "50",
+  {
+    category: "2. Cấu trúc rẽ nhánh",
+    items: [
+      {
+        title: "Lệnh if - elif - else",
+        code: `if a > b:\n    print("a lớn hơn b")\nelif a == b:\n    print("a bằng b")\nelse:\n    print("a nhỏ hơn b")`,
+        note: "Sau if, elif, else bắt buộc có dấu hai chấm : và khối lệnh phải thụt lề 4 dấu cách.",
+      },
+      {
+        title: "Điều kiện kết hợp (and, or, not)",
+        code: `if (x >= 0) and (x <= 100):\n    print("x trong khoảng [0, 100]")\nif a % 2 == 0 or b % 2 == 0:\n    print("Có ít nhất 1 số chẵn")`,
+        note: "Dùng từ khóa tiếng Anh: and (và), or (hoặc), not (phủ định).",
+      },
+    ],
   },
-  blank: {
-    name: "9. Khung soạn thảo tự do (Trống)",
-    category: "Tự do",
-    description: "Trang trống để bạn tự do viết chương trình Python theo ý thích.",
-    code: `# Viết mã nguồn Python 3 tự do tại đây
-# Nhấn nút "Chạy thử (Run)" hoặc tổ hợp Ctrl + Enter để thực thi
-
-print("Xin chào! Bắt đầu gõ code Python của bạn tại đây.")
-`,
-    sampleInput: "",
+  {
+    category: "3. Cấu trúc lặp",
+    items: [
+      {
+        title: "Vòng lặp for với range()",
+        code: `# Từ 0 đến 4 (5 lần lặp):\nfor i in range(5):\n    print(i)\n\n# Từ 1 đến N (bước nhảy 1):\nfor i in range(1, n + 1):\n    print(i)\n\n# Từ 10 lùi về 1 (bước nhảy -1):\nfor i in range(10, 0, -1):\n    print(i)`,
+        note: "range(start, stop) sẽ dừng lại trước giá trị stop (không bao gồm stop).",
+      },
+      {
+        title: "Vòng lặp while",
+        code: `i = 1\nwhile i <= 10:\n    print(i)\n    i += 1  # Bắt buộc tăng biến đếm để tránh lặp vô hạn`,
+        note: "Hãy đảm bảo điều kiện lặp sẽ trở thành False tại một thời điểm.",
+      },
+    ],
   },
-};
+  {
+    category: "4. Danh sách (List)",
+    items: [
+      {
+        title: "Khai báo & Thao tác mảng",
+        code: `arr = [1, 2, 3, 4, 5]\narr.append(10)      # Thêm phần tử vào cuối\nprint(len(arr))     # Độ dài mảng\nprint(arr[0])       # Phần tử đầu tiên (vị trí 0)\nprint(arr[-1])      # Phần tử cuối cùng`,
+        note: "Chỉ số trong Python bắt đầu từ 0.",
+      },
+    ],
+  },
+  {
+    category: "5. Các lỗi cú pháp thường gặp & Khắc phục",
+    items: [
+      {
+        title: "IndentationError (Lỗi thụt lề)",
+        code: `# SAI:\nif a > 0:\nprint("a dương")\n\n# ĐÚNG:\nif a > 0:\n    print("a dương")`,
+        note: "Khối lệnh bên dưới : phải thụt vào trong bằng 4 dấu cách hoặc 1 phím Tab.",
+      },
+      {
+        title: "SyntaxError: invalid syntax",
+        code: `# Thường do thiếu dấu hai chấm : ở cuối câu lệnh if/for/while\n# Hoặc thiếu dấu đóng ngoặc đơn ()`,
+        note: "Đếm số ngoặc mở và đóng, kiểm tra dấu hai chấm ở cuối dòng định nghĩa.",
+      },
+      {
+        title: "NameError: name '...' is not defined",
+        code: `# Do gọi biến trước khi gán giá trị, hoặc viết sai chính tả chữ hoa/thường`,
+        note: "Python phân biệt chữ hoa và thường (tong khác Tong).",
+      },
+      {
+        title: "ZeroDivisionError: division by zero",
+        code: `# Chia cho số 0:\nif b != 0:\n    thuong = a / b\nelse:\n    print("Mẫu số phải khác 0")`,
+        note: "Luôn kiểm tra mẫu số khác 0 trước phép chia.",
+      },
+    ],
+  },
+];
 
 export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
   currentUser,
+  initialLesson = null,
+  availableLessons = [],
+  submissions = [],
   onBack,
   onSubmitWork,
+  onSelectLesson,
 }) => {
-  // Environment mode: "browser" (In-browser Pyodide/Skulpt) vs "ugot" (Robot UGOT trên laptop Windows)
+  // Current active lesson state: null means free practice ("Thực hành Python")
+  const [currentLesson, setCurrentLesson] = useState<Lesson | null>(initialLesson || null);
+
+  // Helper to get storage draft key
+  const getDraftKey = (lessonId?: string | null) => {
+    return `lms_draft_${currentUser.uid}_${lessonId || "free_python"}`;
+  };
+
+  // Initial code resolution: Draft -> Lesson starter code -> Free code
+  const resolveInitialCode = (targetLesson: Lesson | null): string => {
+    const draftKey = getDraftKey(targetLesson?.id);
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (saved !== null && saved.length > 0) return saved;
+    } catch (e) {}
+
+    if (targetLesson) {
+      return (
+        targetLesson.starterCode ||
+        `# Bài tập: ${targetLesson.title}\n# Yêu cầu: ${targetLesson.description || "Thực hiện chương trình theo đề bài."}\n\n`
+      );
+    }
+
+    return `# Thực hành Python 3\n# Nhập mã nguồn của bạn vào đây\n# Nhấn nút "Chạy" (hoặc phím Ctrl + Enter) để thực thi\n\nprint("Xin chào! Bắt đầu gõ code Python tại đây.")\n`;
+  };
+
+  const resolveInitialStdin = (targetLesson: Lesson | null): string => {
+    if (targetLesson && targetLesson.testcases && targetLesson.testcases.length > 0) {
+      return targetLesson.testcases[0].input || "";
+    }
+    return "";
+  };
+
+  // Editor states
+  const [code, setCode] = useState<string>(() => resolveInitialCode(currentLesson));
+  const [stdinInput, setStdinInput] = useState<string>(() => resolveInitialStdin(currentLesson));
+  const [isCodeDirty, setIsCodeDirty] = useState<boolean>(false);
+  const editorRef = useRef<any>(null);
+
+  // Runtime environment: "browser" (In-browser Pyodide/Skulpt) vs "ugot" (Robot UGOT relay)
   const [activeEnvironment, setActiveEnvironment] = useState<"browser" | "ugot">("browser");
 
-  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>("arithmetic_gdpt");
-  const [code, setCode] = useState<string>(PYTHON_TEMPLATES.arithmetic_gdpt.code);
-  const [stdinInput, setStdinInput] = useState<string>(PYTHON_TEMPLATES.arithmetic_gdpt.sampleInput);
-  
-  // Execution state
+  // Execution states
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [consoleOutput, setConsoleOutput] = useState<string>("");
   const [execTime, setExecTime] = useState<number | null>(null);
   const [isError, setIsError] = useState<boolean>(false);
-  const [activeBottomTab, setActiveBottomTab] = useState<"output" | "stdin" | "diary" | "cheatsheet">("output");
-  const [mobileLabTab, setMobileLabTab] = useState<"code" | "output" | "ai" | "diary">("code");
-  const [showCompatModal, setShowCompatModal] = useState<boolean>(false);
 
-  // Editor settings
-  const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
-  const [fontSize, setFontSize] = useState<number>(14);
+  // Bottom pane tab: "output" | "stdin" | "diary"
+  const [bottomTab, setBottomTab] = useState<"output" | "stdin" | "diary">("output");
 
-  // Copy / Download state
-  const [copied, setCopied] = useState<boolean>(false);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(null);
+  // Resizable bottom pane height ratio: 0.35 (default 35% height)
+  const [bottomPaneRatio, setBottomPaneRatio] = useState<number>(0.38);
+  const [isResizing, setIsResizing] = useState<boolean>(false);
 
-  // Student Reflection state (Phần học sinh trả lời để hoàn thiện chu trình sửa lỗi)
+  // Problem description accordion: Expanded by default for assigned lessons, collapsed for free practice
+  const [isProblemExpanded, setIsProblemExpanded] = useState<boolean>(Boolean(currentLesson));
+
+  // Lesson selector modal
+  const [isLessonCatalogOpen, setIsLessonCatalogOpen] = useState<boolean>(false);
+
+  // Cheatsheet slide-over panel
+  const [isCheatsheetOpen, setIsCheatsheetOpen] = useState<boolean>(false);
+
+  // Save draft status
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // Submit status
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submitSuccessMsg, setSubmitSuccessMsg] = useState<string | null>(null);
+
+  // Check if current lesson already has submission
+  const existingSubmission = currentLesson
+    ? submissions.find((s) => s.lessonId === currentLesson.id && (s.studentId === currentUser.uid || s.studentEmail === currentUser.email))
+    : null;
+
+  // Mobile Lab active tab: "problem" | "code" | "output" | "ai"
+  const [mobileTab, setMobileTab] = useState<"problem" | "code" | "output" | "ai">("code");
+
+  // AI Assistant states
+  const [isAiOpen, setIsAiOpen] = useState<boolean>(true);
+  const [hintLevel, setHintLevel] = useState<1 | 2 | 3>(1);
+  const [aiInput, setAiInput] = useState<string>("");
+  const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
+  const [aiMessages, setAiMessages] = useState<ChatMessage[]>(() => [
+    {
+      id: "ai-welcome",
+      role: "assistant",
+      content: currentLesson
+        ? `Chào em! Thầy/cô trợ lý AI đã sẵn sàng hỗ trợ em thực hiện bài **${currentLesson.title}**. Nếu gặp lỗi cú pháp hay chưa biết cách viết logic, em cứ bấm gửi câu hỏi nhé!`
+        : `Chào em! Thầy/cô trợ lý AI đã sẵn sàng đồng hành cùng em trong khu **Thực hành Python**. Em hãy chọn cấp độ gợi ý (Mức 1, 2, 3) và đặt câu hỏi khi cần hướng dẫn tư duy nhé!`,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    },
+  ]);
+  const aiBottomRef = useRef<HTMLDivElement>(null);
+
+  // Debug runs log for the diary
+  const [debugRuns, setDebugRuns] = useState<DebugRunItem[]>([]);
   const [reflection, setReflection] = useState<StudentReflection>({
     errorEncountered: "",
     errorReason: "",
     howFixed: "",
   });
 
-  // Practice Debugging Session state (Lưu nhật ký bền vững)
-  const [debugSession, setDebugSession] = useState<DebugSession>(() => ({
-    sessionId: `py-sess-${Date.now()}`,
-    studentId: currentUser.uid,
-    studentCode: currentUser.studentCode,
-    studentName: currentUser.displayName,
-    lessonId: "python-sandbox-practice",
-    lessonTitle: `Thực hành Python: ${PYTHON_TEMPLATES.arithmetic_gdpt.name}`,
-    startedAt: new Date().toISOString(),
-    initialCode: PYTHON_TEMPLATES.arithmetic_gdpt.code,
-    finalCode: PYTHON_TEMPLATES.arithmetic_gdpt.code,
-    runs: [],
-    hints: [],
-    reflection: {
-      errorEncountered: "",
-      errorReason: "",
-      howFixed: "",
-    },
-    saveStatus: "idle",
-  }));
+  // Switch lesson with automatic draft save to prevent code loss
+  const handleSwitchToLesson = (newLesson: Lesson | null) => {
+    // 1. Auto save draft for current lesson before switching
+    try {
+      const currentDraftKey = getDraftKey(currentLesson?.id);
+      localStorage.setItem(currentDraftKey, code);
+    } catch (e) {}
 
-  // AI Assistant state (3 Hint Levels: 1=Socratic, 2=Vị trí & Nguyên nhân, 3=Nguyên lý & Ví dụ)
-  const [hintLevel, setHintLevel] = useState<1 | 2 | 3>(1);
-  const [isAiOpen, setIsAiOpen] = useState<boolean>(true);
-  const [aiInput, setAiInput] = useState<string>("");
-  const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
-  const [aiErrorState, setAiErrorState] = useState<{ message: string; retryCountdown?: number; lastPrompt?: string } | null>(null);
+    // 2. Set new lesson
+    setCurrentLesson(newLesson);
+    if (onSelectLesson) onSelectLesson(newLesson);
 
-  const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome-py",
-      role: "assistant",
-      content: `Xin chào **${currentUser.displayName}**! 👋 
-Mình là **Gia sư AI Lập trình Python**.
+    // 3. Load draft or starter code for new lesson
+    const nextCode = resolveInitialCode(newLesson);
+    const nextStdin = resolveInitialStdin(newLesson);
+    setCode(nextCode);
+    setStdinInput(nextStdin);
+    setIsCodeDirty(false);
+    setConsoleOutput("");
+    setIsError(false);
+    setSubmitSuccessMsg(null);
+    setIsProblemExpanded(Boolean(newLesson));
 
-Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư phạm**:
-- 🔍 **Mức 1 (Định hướng)**: Đặt câu hỏi Socratic giúp bạn tự nhận ra lỗi.
-- 📍 **Mức 2 (Vị trí & Nguyên nhân)**: Chỉ ra dòng lệnh và nguyên nhân gây lỗi.
-- 💡 **Mức 3 (Nguyên lý & Ví dụ)**: Giải thích lý thuyết và ví dụ tương tự.
+    // Reset AI greeting for new problem
+    setAiMessages([
+      {
+        id: `ai-greet-${Date.now()}`,
+        role: "assistant",
+        content: newLesson
+          ? `Đã chuyển sang bài **${newLesson.title}**. Em hãy đọc kỹ đề bài và bắt đầu viết chương trình nhé!`
+          : `Đã chuyển sang chế độ **Thực hành Python tự do**. Em có thể tự do viết mã lệnh hoặc tra cứu sổ tay cú pháp.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      },
+    ]);
 
-👉 *Gia sư sẽ không giải hộ toàn bộ bài để giúp bạn tự phát triển tư duy lập trình!*`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    }
-  ]);
-  const aiBottomRef = useRef<HTMLDivElement>(null);
+    setIsLessonCatalogOpen(false);
+  };
 
-  // Switch template
-  const handleSelectTemplate = (key: string) => {
-    setSelectedTemplateKey(key);
-    const tmpl = PYTHON_TEMPLATES[key];
-    if (tmpl) {
-      setCode(tmpl.code);
-      setStdinInput(tmpl.sampleInput);
-      setConsoleOutput("");
-      setExecTime(null);
-      setIsError(false);
-      // Reset or update debug session for new problem
-      setDebugSession({
-        sessionId: `py-sess-${Date.now()}`,
-        studentId: currentUser.uid,
-        studentCode: currentUser.studentCode,
-        studentName: currentUser.displayName,
-        lessonId: `python-session-${key}`,
-        lessonTitle: `Thực hành Python: ${tmpl.name}`,
-        startedAt: new Date().toISOString(),
-        initialCode: tmpl.code,
-        finalCode: tmpl.code,
-        runs: [],
-        hints: [],
-        reflection: {
-          errorEncountered: "",
-          errorReason: "",
-          howFixed: "",
-        },
-        saveStatus: "idle",
-      });
-      setReflection({
-        errorEncountered: "",
-        errorReason: "",
-        howFixed: "",
-      });
+  // Save draft explicitly
+  const handleSaveDraft = () => {
+    setSaveStatus("saving");
+    try {
+      const draftKey = getDraftKey(currentLesson?.id);
+      localStorage.setItem(draftKey, code);
+      setIsCodeDirty(false);
+      setTimeout(() => {
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2500);
+      }, 200);
+    } catch (e) {
+      console.warn("Failed to save draft:", e);
+      setSaveStatus("idle");
     }
   };
 
   // Run Code
   const handleRunCode = async () => {
+    if (isRunning) return;
     setIsRunning(true);
-    setActiveBottomTab("output");
-    setConsoleOutput("⏳ Đang chuẩn bị môi trường & thực thi mã nguồn Python...");
+    setConsoleOutput("");
     setIsError(false);
+    setBottomTab("output");
+    setMobileTab("output");
 
+    const startTime = Date.now();
     try {
-      const result = await executeCodeHybrid({
+      const res = await executeCodeHybrid({
         language: "python",
         code,
         stdin: stdinInput,
       });
+      const elapsed = Date.now() - startTime;
+      setExecTime(elapsed);
 
-      setExecTime(result.time);
-
-      let runErrorText: string | undefined = undefined;
-      let runOutputText = result.output || "";
-
-      if (result.error) {
+      if (res.error) {
         setIsError(true);
-        runErrorText = result.error;
-        setConsoleOutput(`❌ LỖI BIÊN DỊCH / THỰC THI (Execution Error):\n${result.error}\n\n${result.output || ""}`);
+        setConsoleOutput(res.error);
+        setDebugRuns((prev) => [
+          ...prev,
+          {
+            id: `run-${Date.now()}-${prev.length + 1}`,
+            timestamp: new Date().toLocaleTimeString(),
+            code,
+            stdin: stdinInput,
+            output: "",
+            error: res.error,
+            timeMs: elapsed,
+            passed: false,
+          },
+        ]);
       } else {
-        const out = result.output !== undefined ? result.output : "";
-        if (out.trim() === "") {
-          setConsoleOutput(`ℹ️ (Chương trình đã chạy hoàn tất trong ${result.time}ms nhưng không in ra kết quả nào với lệnh print)`);
-        } else {
-          setConsoleOutput(out);
-        }
+        setIsError(false);
+        setConsoleOutput(res.output || "(Chương trình đã thực thi thành công nhưng không in ra kết quả)");
+        setDebugRuns((prev) => [
+          ...prev,
+          {
+            id: `run-${Date.now()}-${prev.length + 1}`,
+            timestamp: new Date().toLocaleTimeString(),
+            code,
+            stdin: stdinInput,
+            output: res.output || "",
+            timeMs: elapsed,
+            passed: true,
+          },
+        ]);
       }
-
-      // Record this run into Practice Debugging Session Log
-      const runItem: DebugRunItem = {
-        id: `run-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        code,
-        stdin: stdinInput,
-        output: runOutputText,
-        error: runErrorText,
-        timeMs: result.time,
-        passed: !result.error,
-      };
-
-      setDebugSession((prev) => ({
-        ...prev,
-        runs: [runItem, ...prev.runs],
-        finalCode: code,
-      }));
     } catch (err: any) {
       setIsError(true);
-      setConsoleOutput(`❌ Lỗi thực thi mã nguồn: ${err.message}`);
+      setConsoleOutput(err?.message || "Lỗi thực thi chương trình.");
     } finally {
       setIsRunning(false);
     }
   };
 
-  // Copy code
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  // Stop Execution
+  const handleStopCode = () => {
+    setIsRunning(false);
+    setConsoleOutput((prev) => prev + "\n\n⏹️ [Đã dừng thực thi theo yêu cầu của người dùng]");
   };
 
-  // Download .py file
-  const handleDownloadCode = () => {
-    const blob = new Blob([code], { type: "text/x-python;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `python_stem_${Date.now()}.py`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  // Client-side Pedagogical Hint Generator for Instant Offline Suggestions
-  const generatePedagogicalFallbackResponseClient = (params: {
-    codeContext?: string;
-    consoleOutput?: string;
-    hintLevel?: number;
-  }): string => {
-    const err = (params.consoleOutput || "").toLowerCase();
-    const level = Number(params.hintLevel) || 1;
-
-    if (err.includes("indentationerror") || err.includes("thụt lề") || err.includes("thụt đầu dòng")) {
-      if (level === 1) {
-        return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nTrình biên dịch đang báo lỗi thụt đầu dòng (IndentationError). Em hãy quan sát kỹ: Sau những dòng lệnh nào trong Python (như sau dấu hai chấm \`:\`), các câu lệnh tiếp theo bắt buộc phải thụt vào trong? Các dòng lệnh cùng cấp đã thụt lề bằng nhau chưa?`;
-      }
-      if (level === 2) {
-        return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nLỗi xảy ra ngay sau một cấu trúc có dấu hai chấm \`:\` (như \`if\`, \`for\`, \`while\` hoặc \`def\`).\n👉 **Nguyên nhân:** Dòng lệnh bên dưới chưa thụt vào, hoặc em đang gõ lẫn lộn phím Space (dấu cách) và phím Tab. Hãy rà soát lại các dòng thụt lề ở khối lệnh gần nhất.`;
-      }
-      return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nTrong Python, thụt lề (Indentation) dùng để xác định phạm vi khối lệnh thay vì dùng cặp ngoặc nhọn \`{}\`.\n\nVí dụ đúng chuẩn:\n\`\`\`python\nif diem >= 5:\n    print("Đạt")    # Thụt vào 4 dấu cách\nelse:\n    print("Chưa đạt")\n\`\`\`\nEm hãy áp dụng quy tắc này vào bài đang làm nhé!`;
-    }
-
-    if (err.includes("syntaxerror") || err.includes("cú pháp")) {
-      if (level === 1) {
-        return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nChương trình gặp lỗi cú pháp (SyntaxError). Em hãy kiểm tra xem mình có quên ký tự đặc biệt nào ở cuối câu lệnh rẽ nhánh/vòng lặp (như dấu hai chấm \`:\`), hoặc thiếu dấu đóng ngoặc \`()\` ở các lệnh \`print\`, \`input\` không?`;
-      }
-      if (level === 2) {
-        return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nLỗi cú pháp thường tập trung ở:\n1. **Dấu hai chấm \`:\`**: Em kiểm tra cuối dòng \`def\`, \`if\`, \`elif\`, \`else\`, \`for\`, \`while\` đã có dấu hai chấm chưa?\n2. **Đóng ngoặc đơn \`()\`**: Đếm số lượng ngoặc mở và đóng trong câu lệnh có khớp nhau không?`;
-      }
-      return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nPython yêu cầu mọi câu lệnh định nghĩa khối phải kết thúc bằng dấu hai chấm \`:\`.\n\nVí dụ minh họa:\n\`\`\`python\nfor i in range(1, 10):  # Bắt buộc có dấu hai chấm ở cuối\n    print(i)\n\`\`\`\nHãy so sánh với cú pháp dòng lệnh của em để tự sửa lại nhé.`;
-    }
-
-    if (err.includes("nameerror")) {
-      if (level === 1) {
-        return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nThông báo \`NameError\` nghĩa là Python không nhận diện được tên biến hoặc tên hàm. Em thử kiểm tra xem tên đó đã được tạo ra trước khi sử dụng chưa, và có viết sai chính tả chữ hoa/thường không?`;
-      }
-      return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nLỗi NameError xuất hiện khi biến chưa được gán giá trị ở các dòng phía trên, hoặc tên biến bị gõ sai (Python phân biệt chữ hoa/thường, ví dụ \`tong\` khác \`Tong\`). Hãy kiểm tra lại tên biến trong lệnh đang tính toán.`;
-    }
-
-    if (level === 1) {
-      return `💡 **Gợi ý Mức 1 (Định hướng Socratic):**\nEm hãy quan sát kết quả chạy ở màn hình và mục đích của bài toán:\n1. Đầu vào cần nhập dữ liệu dạng gì?\n2. Kết quả máy tính đang in ra có đúng với ví dụ mẫu không, hay xuất hiện dòng báo lỗi nào?`;
-    } else if (level === 2) {
-      return `💡 **Gợi ý Mức 2 (Vị trí & Nguyên nhân):**\nEm hãy kiểm tra thứ tự thực hiện các bước trong chương trình:\n- Bước 1: Nhập dữ liệu và ép kiểu.\n- Bước 2: Vòng lặp hoặc điều kiện tính toán.\n- Bước 3: In kết quả ra màn hình với \`print()\`. Dòng nào đang thực hiện chưa đúng ý định của em?`;
-    }
-    return `💡 **Gợi ý Mức 3 (Nguyên lý & Ví dụ tương tự):**\nVí dụ cấu trúc chuẩn nhập và tính toán lặp:\n\`\`\`python\ntong = 0\nfor x in [1, 2, 3, 4]:\n    tong += x\nprint("Tổng là:", tong)\n\`\`\`\nEm hãy vận dụng cấu trúc tương tự để hoàn thiện bài của mình nhé!`;
-  };
-
-  // Instant Fallback Hint (Không gọi Gemini thêm lần nào, trả kết quả tức thì)
-  const handleInstantFallbackHint = (targetLevel?: 1 | 2 | 3) => {
-    const lvl = targetLevel !== undefined ? targetLevel : hintLevel;
-    const fallbackText = generatePedagogicalFallbackResponseClient({
-      codeContext: code,
-      consoleOutput,
-      hintLevel: lvl,
-    });
-
-    const assistantMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `⚠️ **[Gợi ý có sẵn — không phải phản hồi AI]**\n\n${fallbackText}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setAiMessages((prev) => [...prev, assistantMsg]);
-    setAiErrorState(null);
-
-    const hintItem: AiHintItem = {
-      id: `hint-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      level: lvl,
-      prompt: aiErrorState?.lastPrompt || `Xem gợi ý có sẵn Mức ${lvl}`,
-      response: fallbackText,
-      source: "fallback",
-    };
-
-    setDebugSession((prev) => ({
-      ...prev,
-      hints: [hintItem, ...prev.hints],
-    }));
-
-    setTimeout(() => {
-      aiBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  };
-
-  // Save practice work (Bỏ việc tự gán 10/10 và graded; lưu ở trạng thái submitted với score: null; không tạo bài trùng khi thử lại)
-  const handleSavePractice = async () => {
+  // Submit Work (Only for assigned lesson)
+  const handleSubmitAssignment = async () => {
+    if (!currentLesson) return;
     if (!onSubmitWork) return;
-    setIsSaving(true);
-    setSaveError(null);
 
-    const sessionToSave: DebugSession = {
-      ...debugSession,
-      finalCode: code,
-      finishedAt: new Date().toISOString(),
-      reflection,
-      saveStatus: "saving",
-    };
+    if (!confirm(`Bạn có chắc chắn muốn nộp bài làm cho bài "${currentLesson.title}" không?`)) {
+      return;
+    }
 
-    const subIdToUse = activeSubmissionId || `sub-py-${Date.now()}`;
+    setIsSubmitting(true);
     try {
+      // Auto-save draft first
+      handleSaveDraft();
+
       await onSubmitWork({
-        id: subIdToUse,
-        lessonId: `python-session-${selectedTemplateKey}`,
-        lessonTitle: `Thực hành Python: ${PYTHON_TEMPLATES[selectedTemplateKey]?.name || "Mã tự do"}`,
+        id: existingSubmission?.id || `sub-${Date.now()}`,
+        lessonId: currentLesson.id,
+        lessonTitle: currentLesson.title,
         studentId: currentUser.uid,
         studentName: currentUser.displayName,
         studentEmail: currentUser.email,
         moduleType: "coding",
         content: {
-          language: "python",
           code,
+          language: "python",
           stdin: stdinInput,
           consoleOutput,
-          templateKey: selectedTemplateKey,
-          debugSession: sessionToSave,
         },
-        // Bắt đầu bằng trạng thái submitted, điểm số null (chờ giáo viên duyệt và chấm điểm)
-        score: null,
-        maxScore: 10,
         status: "submitted",
+        score: null,
+        maxScore: currentLesson.maxScore ?? 10,
+        submittedAt: new Date().toISOString(),
       });
 
-      setActiveSubmissionId(subIdToUse);
-      setSaveSuccess(true);
-      setDebugSession({ ...sessionToSave, saveStatus: "saved" });
-      setTimeout(() => setSaveSuccess(false), 4000);
-    } catch (e: any) {
-      console.error("Save practice error:", e);
-      setSaveError(e?.message || "Lỗi lưu bài nộp. Dữ liệu chưa được đồng bộ.");
-      setDebugSession({ ...sessionToSave, saveStatus: "error" });
+      setSubmitSuccessMsg(`🎉 Đã nộp bài thành công! Thầy cô sẽ sớm xem và chấm điểm bài của bạn.`);
+    } catch (err: any) {
+      alert("Lỗi khi nộp bài: " + (err.message || "Vui lòng kiểm tra lại kết nối mạng!"));
     } finally {
-      setIsSaving(false);
+      setIsSubmitting(false);
     }
   };
 
-  // Send message to AI Tutor (supports 3 hint levels & graceful error handling)
-  const handleSendAi = async (customPrompt?: string, targetLevel?: 1 | 2 | 3, forceFallback: boolean = false) => {
-    const lvl = targetLevel !== undefined ? targetLevel : hintLevel;
-    const text = customPrompt || aiInput.trim();
-    if (!text || isAiThinking) return;
-
-    // Ensure AI drawer is open
-    setIsAiOpen(true);
-    setAiErrorState(null);
+  // Ask AI Tutor
+  const handleSendAi = async (customPrompt?: string) => {
+    const textToSend = customPrompt || aiInput.trim();
+    if (!textToSend || isAiThinking) return;
 
     const userMsg: ChatMessage = {
-      id: Date.now().toString(),
+      id: `user-${Date.now()}`,
       role: "user",
-      content: `[Mức ${lvl}] ${text}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      content: textToSend,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
 
     setAiMessages((prev) => [...prev, userMsg]);
@@ -589,951 +485,999 @@ Hệ thống hỗ trợ hướng dẫn sửa lỗi theo **3 Mức độ sư ph�
 
     setTimeout(() => {
       aiBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+    }, 50);
 
     try {
+      const problemContext = currentLesson
+        ? `Đề bài: ${currentLesson.title}\nYêu cầu: ${currentLesson.description || ""}`
+        : "Chế độ thực hành tự do Python 3";
+
       const res = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: text,
-          hintLevel: lvl,
-          history: aiMessages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
+          message: textToSend,
           codeContext: code,
-          stdin: stdinInput,
           language: "python",
-          consoleOutput: consoleOutput ? consoleOutput.slice(0, 1500) : undefined,
+          consoleOutput: consoleOutput || undefined,
+          stdin: stdinInput || undefined,
+          hintLevel,
           studentId: currentUser.uid,
-          allowFallback: forceFallback, // Only use fallback if forced or agreed
+          allowFallback: true,
+          history: aiMessages.slice(-4).map((m) => ({ role: m.role, content: m.content })),
         }),
       });
 
-      if (!res.ok) {
-        // Inspect HTTP status codes
-        if (res.status === 429) {
-          const errData = await res.json().catch(() => ({}));
-          const retryAfter = errData.retryAfter || 15;
-          setAiErrorState({
-            message: `⚠️ Tần suất yêu cầu quá nhanh. Vui lòng đợi ${retryAfter} giây trước khi gửi tiếp.`,
-            retryCountdown: retryAfter,
-            lastPrompt: text,
-          });
-          return;
-        }
-
-        if (res.status === 503 || res.status === 504) {
-          setAiErrorState({
-            message: "⚠️ Dịch vụ Gia sư AI đang quá tải hoặc gián đoạn kết nối. Bạn có thể nhấn 'Thử lại' hoặc 'Xem gợi ý có sẵn'.",
-            lastPrompt: text,
-          });
-          return;
-        }
-
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Lỗi máy chủ (${res.status})`);
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error("Phản hồi máy chủ không hợp lệ.");
       }
 
       const data = await res.json();
-      const isFallback = Boolean(data.isFallback || data.source === "fallback");
-      const replyContent = isFallback
-        ? `⚠️ **[Gợi ý có sẵn — không phải phản hồi AI]**\n\n${data.text}`
-        : data.text || "Gia sư đã xem qua mã nguồn nhưng chưa có phản hồi phù hợp.";
+      if (!res.ok) {
+        throw new Error(data.error || `Lỗi máy chủ (${res.status})`);
+      }
 
-      const assistantMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+      const aiMsg: ChatMessage = {
+        id: `ai-${Date.now()}`,
         role: "assistant",
-        content: replyContent,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        content: data.text || "Thầy/cô đang sẵn sàng giải đáp, em hãy thử hỏi cụ thể hơn nhé!",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
-      setAiMessages((prev) => [...prev, assistantMsg]);
-
-      // Record received hint into debugSession
-      const hintItem: AiHintItem = {
-        id: `hint-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        level: lvl,
-        prompt: text,
-        response: data.text,
-        source: isFallback ? "fallback" : "ai",
-      };
-
-      setDebugSession((prev) => ({
-        ...prev,
-        hints: [hintItem, ...prev.hints],
-      }));
+      setAiMessages((prev) => [...prev, aiMsg]);
     } catch (err: any) {
-      setAiErrorState({
-        message: `⚠️ Lỗi kết nối AI: ${err?.message || "Không thể kết nối đến máy chủ"}.`,
-        lastPrompt: text,
-      });
+      const errorMsg: ChatMessage = {
+        id: `ai-err-${Date.now()}`,
+        role: "assistant",
+        content: `⚠️ ${err.message || "Kết nối Gia sư AI tạm thời gián đoạn. Bạn hãy thử kiểm tra lại cú pháp hoặc thử lại sau vài giây!"}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setAiMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsAiThinking(false);
       setTimeout(() => {
         aiBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 100);
+      }, 80);
     }
   };
 
+  // Resize split pane divider
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    const startY = e.clientY;
+    const container = document.getElementById("python-workspace-container");
+    if (!container) return;
+    const containerHeight = container.getBoundingClientRect().height;
+    const startRatio = bottomPaneRatio;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newRatio = Math.max(0.2, Math.min(0.75, startRatio - deltaY / containerHeight));
+      setBottomPaneRatio(newRatio);
+      if (editorRef.current) {
+        editorRef.current.layout();
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      if (editorRef.current) {
+        editorRef.current.layout();
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
   return (
-    <div className="flex flex-col h-full min-h-0 flex-1 bg-slate-950 text-slate-100 font-sans select-none overflow-hidden">
-      {/* Top Navbar */}
-      <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 z-10">
-        {/* Left side: Back + Title & Template Selector */}
-        <div className="flex items-center gap-3">
+    <div className="flex-1 w-full h-full flex flex-col bg-slate-900 text-slate-100 overflow-hidden font-sans select-none">
+      {/* 1. TOP HEADER (Super Compact & Clean) */}
+      <header className="h-12 bg-slate-950 border-b border-slate-800 px-3 flex items-center justify-between gap-2 shrink-0 z-20">
+        {/* Left: Back & Title */}
+        <div className="flex items-center gap-2 min-w-0">
           {onBack && (
             <button
+              type="button"
               onClick={onBack}
-              className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 rounded-xl transition-all border border-slate-700/60 cursor-pointer"
-              title="Quay lại danh sách khóa học"
+              className="h-8 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+              title="Quay lại"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Quay lại</span>
             </button>
           )}
 
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black shadow-xs">
-              <Code2 className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-white tracking-tight">Khu Lập Trình Python 3</span>
-              </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                Thực hành gõ code, gỡ lỗi & điều khiển robot UGOT
-              </p>
-            </div>
+          {/* Current Problem Name */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+            <h1 className="text-xs sm:text-sm font-semibold text-white truncate max-w-[140px] sm:max-w-[260px] md:max-w-[340px]">
+              {currentLesson ? currentLesson.title : "Thực hành Python"}
+            </h1>
+            {!currentLesson ? (
+              <span className="hidden md:inline text-[10px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded-sm">
+                Tự do
+              </span>
+            ) : (
+              <span className="hidden md:inline text-[10px] text-blue-400 bg-blue-950/80 border border-blue-800/60 px-1.5 py-0.5 rounded-sm">
+                Bài tập được giao
+              </span>
+            )}
           </div>
 
-          {/* TWO CLEAR ENVIRONMENTS TOGGLE */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 ml-2">
-            <button
-              type="button"
-              onClick={() => setActiveEnvironment("browser")}
-              className={`min-h-[32px] px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeEnvironment === "browser"
-                  ? "bg-blue-600 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>Python trong trình duyệt</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveEnvironment("ugot")}
-              className={`min-h-[32px] px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeEnvironment === "ugot"
-                  ? "bg-indigo-600 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>UGOT trên laptop Windows</span>
-            </button>
-          </div>
-
-          {/* Template Selector Dropdown (When in browser mode) */}
-          {activeEnvironment === "browser" && (
-            <div className="hidden lg:flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-800">
-              <span className="text-[11px] font-bold text-slate-400">Mẫu:</span>
-              <select
-                value={selectedTemplateKey}
-                onChange={(e) => handleSelectTemplate(e.target.value)}
-                className="bg-slate-800 text-xs font-semibold text-amber-300 border border-slate-700 rounded-lg px-2.5 py-1 focus:outline-none focus:border-amber-500 transition-colors"
-              >
-                {Object.entries(PYTHON_TEMPLATES).map(([key, item]) => (
-                  <option key={key} value={key} className="bg-slate-900 text-slate-200">
-                    [{item.category}] {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* Lesson Catalog Button */}
+          <button
+            type="button"
+            onClick={() => setIsLessonCatalogOpen(true)}
+            className="h-8 px-2.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 border border-slate-700/60"
+            title="Đổi bài tập hoặc chuyển sang thực hành tự do"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Chọn bài</span>
+          </button>
         </div>
 
-        {/* Right side: Actions (Run, Reset, Copy, Download, AI) */}
-        <div className="flex items-center gap-2">
-          {/* Theme toggle */}
-          <button
-            onClick={() => setTheme(theme === "vs-dark" ? "light" : "vs-dark")}
-            className="hidden sm:inline-flex items-center min-h-[36px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-300 border border-slate-700 transition-colors"
-            title="Đổi giao diện Sáng / Tối"
-          >
-            {theme === "vs-dark" ? "🌙 Tối" : "☀️ Sáng"}
-          </button>
-
-          {/* Copy Code */}
-          <button
-            onClick={handleCopyCode}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
-            title="Sao chép toàn bộ mã nguồn"
-          >
-            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-          </button>
-
-          {/* Download File */}
-          <button
-            onClick={handleDownloadCode}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
-            title="Tải file .py về máy tính"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-
-          {/* Reset Code */}
-          <button
-            onClick={() => handleSelectTemplate(selectedTemplateKey)}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
-            title="Khôi phục lại mã ban đầu của mẫu này"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-
-          {/* Save to Practice Diary (if callback provided) */}
-          {onSubmitWork && (
+        {/* Center: Main Primary Actions (Run, Stop, Save, Submit) */}
+        <div className="flex items-center gap-1.5">
+          {/* Run / Stop Button */}
+          {!isRunning ? (
             <button
-              onClick={handleSavePractice}
-              disabled={isSaving}
-              className={`hidden lg:inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                saveSuccess
-                  ? "bg-emerald-900/60 text-emerald-300 border-emerald-700"
-                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
-              }`}
-              title="Lưu bài thực hành vào hồ sơ học sinh"
+              type="button"
+              onClick={handleRunCode}
+              className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Chạy chương trình (Ctrl + Enter)"
             >
-              {saveSuccess ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Đã lưu!</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-3.5 h-3.5 text-blue-400" />
-                  <span>{isSaving ? "Đang lưu..." : "Lưu vào nhật ký"}</span>
-                </>
-              )}
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>Chạy</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleStopCode}
+              className="h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs animate-pulse"
+              title="Dừng chạy chương trình"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Dừng</span>
             </button>
           )}
 
-          {/* RUN CODE BUTTON (Desktop / Tablet) */}
+          {/* Save Draft */}
           <button
-            onClick={handleRunCode}
-            disabled={isRunning}
-            className="hidden md:flex min-h-[36px] px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-xs font-bold transition-all items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
-            title="Chạy thử code Python (Ctrl + Enter)"
+            type="button"
+            onClick={handleSaveDraft}
+            className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer border ${
+              saveStatus === "saved"
+                ? "bg-emerald-950/60 text-emerald-300 border-emerald-700"
+                : isCodeDirty
+                ? "bg-slate-800 text-amber-300 border-amber-600/40 hover:bg-slate-700"
+                : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white"
+            }`}
+            title="Lưu bản nháp"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isRunning ? "Đang chạy..." : "Chạy thử (Run)"}</span>
+            {saveStatus === "saved" ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden md:inline">Đã lưu</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Lưu</span>
+              </>
+            )}
           </button>
 
-          {/* Toggle AI Sidebar */}
+          {/* Submit Button (ONLY SHOWN FOR ASSIGNED LESSONS as per Requirement 2) */}
+          {currentLesson && onSubmitWork && (
+            <button
+              type="button"
+              onClick={handleSubmitAssignment}
+              disabled={isSubmitting}
+              className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+              title="Nộp bài cho giáo viên"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Nộp bài</span>
+            </button>
+          )}
+
+          {/* Cheatsheet Toggle */}
           <button
-            onClick={() => setIsAiOpen(!isAiOpen)}
-            className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
-              isAiOpen
-                ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
-                : "bg-slate-800 text-indigo-300 border-indigo-800 hover:bg-slate-700"
+            type="button"
+            onClick={() => setIsCheatsheetOpen(true)}
+            className="h-8 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer border border-slate-700"
+            title="Mở Sổ tay cú pháp Python"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden lg:inline">Sổ tay cú pháp</span>
+          </button>
+        </div>
+
+        {/* Right: AI Tutor Toggle & Environment */}
+        <div className="flex items-center gap-1.5">
+          {/* UGOT Robot practice mode toggle */}
+          <button
+            type="button"
+            onClick={() => setActiveEnvironment(activeEnvironment === "browser" ? "ugot" : "browser")}
+            className={`h-8 px-2 rounded-lg text-xs font-medium transition-colors hidden md:flex items-center gap-1 cursor-pointer border ${
+              activeEnvironment === "ugot"
+                ? "bg-purple-950 text-purple-300 border-purple-700"
+                : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200"
             }`}
+            title="Chuyển chế độ Robot UGOT / Python Web"
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            <span>UGOT</span>
+          </button>
+
+          {/* AI Tutor Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsAiOpen(!isAiOpen);
+              if (mobileTab === "ai") setMobileTab("code");
+            }}
+            className={`h-8 px-2.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer border ${
+              isAiOpen
+                ? "bg-blue-600 text-white border-blue-500 shadow-xs"
+                : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white"
+            }`}
+            title="Bật/Tắt Gia sư AI"
           >
             <Bot className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Gia Sư AI</span>
+            <span className="hidden sm:inline">Gia sư AI</span>
           </button>
         </div>
       </header>
 
-      {/* Active Environment: In-browser Python vs UGOT Robot on Windows */}
-      {activeEnvironment === "ugot" ? (
-        <UgotPracticePanel currentUser={currentUser} />
-      ) : (
-        <>
-          {/* Mobile Tab Navigation Bar (< 768px) */}
-          <div className="md:hidden flex items-center bg-slate-900 border-b border-slate-800 shrink-0 px-2 py-1 gap-1">
+      {/* MOBILE TAB BAR (<768px: [Đề bài] [Mã nguồn] [Kết quả] [Gia sư AI]) */}
+      <div className="md:hidden h-10 bg-slate-950 border-b border-slate-800 grid grid-cols-4 px-2 gap-1 shrink-0 z-10 text-xs font-medium">
         <button
           type="button"
-          onClick={() => setMobileLabTab("code")}
-          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-            mobileLabTab === "code" ? "bg-blue-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          onClick={() => setMobileTab("problem")}
+          className={`py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+            mobileTab === "problem"
+              ? "bg-slate-800 text-white font-semibold"
+              : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          <Code2 className="w-4 h-4" />
+          <FileCode className="w-3.5 h-3.5" />
+          <span>Đề bài</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("code")}
+          className={`py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+            mobileTab === "code"
+              ? "bg-slate-800 text-white font-semibold"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Code2 className="w-3.5 h-3.5" />
           <span>Mã</span>
         </button>
         <button
           type="button"
-          onClick={() => setMobileLabTab("output")}
-          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-            mobileLabTab === "output" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          onClick={() => setMobileTab("output")}
+          className={`py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer relative ${
+            mobileTab === "output"
+              ? "bg-slate-800 text-white font-semibold"
+              : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          <Terminal className="w-4 h-4" />
+          <Terminal className="w-3.5 h-3.5" />
           <span>Kết quả</span>
-          {consoleOutput.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+          {isError && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 absolute top-2 right-2" />}
         </button>
         <button
           type="button"
-          onClick={() => setMobileLabTab("ai")}
-          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-            mobileLabTab === "ai" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
+          onClick={() => setMobileTab("ai")}
+          className={`py-1.5 rounded-md transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+            mobileTab === "ai"
+              ? "bg-blue-600 text-white font-semibold"
+              : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          <Bot className="w-4 h-4" />
+          <Bot className="w-3.5 h-3.5" />
           <span>Gia sư</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileLabTab("diary")}
-          className={`flex-1 min-h-[44px] py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-            mobileLabTab === "diary" ? "bg-amber-600 text-white shadow-xs" : "text-slate-400 hover:text-white hover:bg-slate-800"
-          }`}
-        >
-          <History className="w-4 h-4" />
-          <span>Nhật ký</span>
         </button>
       </div>
 
-      {/* Main Workspace (Split into Editor/Bottom Panel on left, and AI Sidebar on right) */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left / Center: Editor + Bottom Panels */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Mobile Template Selector Bar */}
-          <div className="md:hidden bg-slate-900 px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-400">Mẫu:</span>
-            <select
-              value={selectedTemplateKey}
-              onChange={(e) => handleSelectTemplate(e.target.value)}
-              className="flex-1 bg-slate-800 text-xs font-semibold text-amber-300 border border-slate-700 rounded-md px-2 py-1"
-            >
-              {Object.entries(PYTHON_TEMPLATES).map(([key, item]) => (
-                <option key={key} value={key}>
-                  [{item.category}] {item.name}
-                </option>
-              ))}
-            </select>
+      {/* Submission Success Alert */}
+      {submitSuccessMsg && (
+        <div className="bg-emerald-950 border-b border-emerald-800 px-4 py-2 text-xs text-emerald-200 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{submitSuccessMsg}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => setSubmitSuccessMsg(null)}
+            className="text-emerald-400 hover:text-emerald-200 p-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
-          {/* Monaco Editor Container */}
-          <div className="flex-1 relative min-h-[220px]">
-            <Editor
-              height="100%"
-              language="python"
-              theme={theme}
-              value={code}
-              onChange={(val) => setCode(val || "")}
-              options={{
-                fontSize: fontSize,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 4,
-                insertSpaces: true,
-                fontFamily: "JetBrains Mono, Fira Code, Consolas, monospace",
-                lineNumbers: "on",
-                suggestOnTriggerCharacters: true,
-                renderLineHighlight: "all",
-              }}
-            />
-          </div>
-
-          {/* Bottom Panel (Output, Input stdin, Cheatsheet) */}
-          <div className="h-64 border-t border-slate-800 bg-slate-900 flex flex-col shrink-0">
-            {/* Tab Header */}
-            <div className="h-9 px-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setActiveBottomTab("output")}
-                  className={`px-3 py-1 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 ${
-                    activeBottomTab === "output"
-                      ? "bg-slate-800 text-white border border-slate-700/80"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Terminal Kết Quả (Stdout)</span>
-                  {execTime !== null && (
-                    <span className="text-[10px] text-slate-400 font-normal">({execTime}ms)</span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => setActiveBottomTab("stdin")}
-                  className={`px-3 py-1 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 ${
-                    activeBottomTab === "stdin"
-                      ? "bg-slate-800 text-white border border-slate-700/80"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Sliders className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Dữ Liệu Đầu Vào (Stdin)</span>
-                  {stdinInput.trim() !== "" && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  )}
-                </button>
-
-                <button
-                  onClick={() => setActiveBottomTab("diary")}
-                  className={`px-3 py-1 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 ${
-                    activeBottomTab === "diary"
-                      ? "bg-slate-800 text-white border border-slate-700/80"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <History className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Nhật Ký Sửa Lỗi & Tự Giải Thích</span>
-                  {(debugSession.runs.length > 0 || debugSession.hints.length > 0) && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-900/80 text-indigo-300 font-bold">
-                      {debugSession.runs.length} lần chạy • {debugSession.hints.length} gợi ý
+      {/* 2. MAIN WORKSPACE CONTAINER */}
+      <div
+        id="python-workspace-container"
+        className="flex-1 min-h-0 w-full flex flex-col md:flex-row overflow-hidden relative"
+      >
+        {/* LEFT COLUMN: Code Area & Results (Full width or split with AI on desktop) */}
+        <div
+          className={`flex-1 min-h-0 flex flex-col bg-slate-900 border-r border-slate-800 overflow-hidden ${
+            mobileTab === "ai" ? "hidden md:flex" : "flex"
+          }`}
+        >
+          {/* A. COLLAPSIBLE PROBLEM DESCRIPTION STRIP */}
+          {currentLesson && (
+            <div className={`border-b border-slate-800 bg-slate-950/80 transition-all ${
+              mobileTab === "problem" ? "block" : "hidden md:block"
+            }`}>
+              <div
+                onClick={() => setIsProblemExpanded(!isProblemExpanded)}
+                className="px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-slate-900 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+                    Đề bài:
+                  </span>
+                  <span className="text-xs text-slate-200 font-medium truncate">
+                    {currentLesson.title}
+                  </span>
+                  {currentLesson.dueDate && (
+                    <span className="hidden sm:inline text-[11px] text-slate-400">
+                      (Hạn: {new Date(currentLesson.dueDate).toLocaleDateString("vi-VN")})
                     </span>
                   )}
-                </button>
-
+                </div>
                 <button
-                  onClick={() => setActiveBottomTab("cheatsheet")}
-                  className={`px-3 py-1 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 ${
-                    activeBottomTab === "cheatsheet"
-                      ? "bg-slate-800 text-white border border-slate-700/80"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
+                  type="button"
+                  className="text-slate-400 hover:text-slate-200 p-1 rounded-md"
+                  aria-label="Thu gọn đề bài"
                 >
-                  <BookOpen className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Sổ Tay Cú Pháp Nhanh</span>
+                  {isProblemExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
               </div>
 
+              {/* Expanded Problem Details */}
+              {isProblemExpanded && (
+                <div className="px-3 pb-3 pt-1 text-xs text-slate-300 max-h-48 overflow-y-auto space-y-2 border-t border-slate-800/60 bg-slate-950/40">
+                  <div className="leading-relaxed whitespace-pre-line text-slate-300">
+                    {currentLesson.description || "Thực hiện chương trình Python theo yêu cầu của bài tập."}
+                  </div>
+
+                  {currentLesson.testcases && currentLesson.testcases.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-slate-800/80">
+                      <span className="text-[11px] font-semibold text-slate-400 block mb-1">
+                        Ví dụ mẫu:
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-[11px]">
+                        <div className="bg-slate-900 p-2 rounded-md border border-slate-800">
+                          <span className="text-slate-400 block text-[10px] uppercase font-sans">Đầu vào mẫu:</span>
+                          <span className="text-emerald-300 whitespace-pre">{currentLesson.testcases[0].input || "(Trống)"}</span>
+                        </div>
+                        <div className="bg-slate-900 p-2 rounded-md border border-slate-800">
+                          <span className="text-slate-400 block text-[10px] uppercase font-sans">Đầu ra mong đợi:</span>
+                          <span className="text-blue-300 whitespace-pre">{currentLesson.testcases[0].expectedOutput}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* B. CODE EDITOR AREA */}
+          <div
+            className={`min-h-0 w-full relative ${
+              mobileTab === "problem" || mobileTab === "output" ? "hidden md:flex flex-col" : "flex flex-col"
+            }`}
+            style={{
+              height: window.innerWidth >= 768 ? `${(1 - bottomPaneRatio) * 100}%` : "100%",
+            }}
+          >
+            {/* Editor Toolbar Strip */}
+            <div className="h-7 bg-slate-950/70 border-b border-slate-800/80 px-3 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
               <div className="flex items-center gap-2">
+                <span className="font-mono text-slate-300">main.py</span>
+                {isCodeDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Chưa lưu" />}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="hidden sm:inline text-slate-500">Ctrl + Enter: Chạy</span>
                 <button
                   type="button"
-                  onClick={() => setShowCompatModal(true)}
-                  className="text-[11px] text-slate-400 hover:text-amber-300 flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60"
-                  title="Xem thông tin môi trường & giới hạn tương thích Python"
+                  onClick={() => {
+                    navigator.clipboard.writeText(code);
+                    alert("Đã sao chép mã nguồn vào clipboard!");
+                  }}
+                  className="hover:text-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Sao chép toàn bộ mã"
                 >
-                  <Info className="w-3 h-3 text-amber-400" />
-                  <span>Giới hạn bộ chạy</span>
+                  <Copy className="w-3 h-3" />
+                  <span className="hidden sm:inline">Sao chép</span>
                 </button>
-
-                {activeBottomTab === "output" && (
-                  <button
-                    onClick={() => setConsoleOutput("")}
-                    className="text-[11px] text-slate-500 hover:text-slate-300 flex items-center gap-1"
-                    title="Xóa nội dung màn hình kết quả"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Xóa</span>
-                  </button>
-                )}
               </div>
             </div>
 
-            {/* Tab Body */}
-            <div className="flex-1 p-3 overflow-y-auto font-mono text-xs">
-              {activeBottomTab === "output" && (
-                <div>
-                  {consoleOutput === "" ? (
-                    <div className="text-slate-500 italic py-4 flex flex-col items-center justify-center gap-2">
-                      <Terminal className="w-6 h-6 opacity-40" />
-                      <span>Chưa có kết quả thực thi. Nhấn nút <strong>"Chạy thử (Run)"</strong> ở góc trên để chạy chương trình.</span>
+            {/* Monaco Editor Component */}
+            <div className="flex-1 min-h-0 w-full bg-slate-900">
+              <Editor
+                height="100%"
+                language="python"
+                theme="vs-dark"
+                value={code}
+                onChange={(val) => {
+                  setCode(val || "");
+                  setIsCodeDirty(true);
+                }}
+                onMount={(editor) => {
+                  editorRef.current = editor;
+                  editor.addCommand(2048 | 3, () => {
+                    handleRunCode();
+                  });
+                }}
+                options={{
+                  fontSize: 14,
+                  lineNumbers: "on",
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  tabSize: 4,
+                  wordWrap: "on",
+                  fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace",
+                  renderWhitespace: "selection",
+                  smoothScrolling: true,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* C. RESIZABLE DIVIDER (Desktop only) */}
+          <div
+            onMouseDown={handleMouseDownResize}
+            className="hidden md:flex h-2 bg-slate-950 hover:bg-blue-600/60 active:bg-blue-600 cursor-row-resize items-center justify-center shrink-0 border-y border-slate-800 transition-colors z-10"
+            title="Kéo để điều chỉnh chiều cao giữa trình soạn thảo và bảng kết quả"
+          >
+            <div className="w-8 h-0.5 bg-slate-600 rounded-full" />
+          </div>
+
+          {/* D. BOTTOM CONSOLE / RESULTS AREA */}
+          <div
+            className={`min-h-0 w-full bg-slate-950 flex flex-col ${
+              mobileTab === "output" ? "flex flex-1" : mobileTab === "problem" || mobileTab === "code" ? "hidden md:flex" : "hidden md:flex"
+            }`}
+            style={{
+              height: window.innerWidth >= 768 ? `${bottomPaneRatio * 100}%` : "100%",
+            }}
+          >
+            {/* Bottom Tabs Bar */}
+            <div className="h-9 bg-slate-950 border-b border-slate-800 px-2 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBottomTab("output")}
+                  className={`px-3 py-1.5 rounded-t-md font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    bottomTab === "output"
+                      ? "bg-slate-900 text-white border-t-2 border-blue-500"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span>Kết quả</span>
+                  {execTime !== null && (
+                    <span className="text-[10px] text-slate-500 font-mono">({execTime}ms)</span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBottomTab("stdin")}
+                  className={`px-3 py-1.5 rounded-t-md font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    bottomTab === "stdin"
+                      ? "bg-slate-900 text-white border-t-2 border-blue-500"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>Dữ liệu vào (input)</span>
+                  {stdinInput && <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBottomTab("diary")}
+                  className={`px-3 py-1.5 rounded-t-md font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    bottomTab === "diary"
+                      ? "bg-slate-900 text-white border-t-2 border-blue-500"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Nhật ký ({debugRuns.length})</span>
+                </button>
+              </div>
+
+              {/* Right controls for console */}
+              <div className="flex items-center gap-2">
+                {consoleOutput && bottomTab === "output" && (
+                  <button
+                    type="button"
+                    onClick={() => setConsoleOutput("")}
+                    className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded-md hover:bg-slate-850 cursor-pointer"
+                  >
+                    Xóa kết quả
+                  </button>
+                )}
+                {/* Ratio presets */}
+                <div className="hidden lg:flex items-center gap-1 text-[10px] text-slate-500">
+                  <button
+                    type="button"
+                    onClick={() => setBottomPaneRatio(0.25)}
+                    className="hover:text-slate-300 px-1"
+                    title="Thu nhỏ bảng kết quả"
+                  >
+                    25%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBottomPaneRatio(0.4)}
+                    className="hover:text-slate-300 px-1"
+                    title="Mặc định bảng kết quả"
+                  >
+                    40%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBottomPaneRatio(0.6)}
+                    className="hover:text-slate-300 px-1"
+                    title="Mở rộng bảng kết quả"
+                  >
+                    60%
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Content Area */}
+            <div className="flex-1 min-h-0 bg-slate-900 p-3 overflow-y-auto font-mono text-xs select-text">
+              {/* Tab 1: Output */}
+              {bottomTab === "output" && (
+                <div className="h-full">
+                  {isRunning ? (
+                    <div className="flex items-center gap-2 text-slate-400 pt-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                      <span>Đang thực thi chương trình Python...</span>
+                    </div>
+                  ) : consoleOutput ? (
+                    <div
+                      className={`whitespace-pre-wrap leading-relaxed ${
+                        isError ? "text-rose-400" : "text-emerald-300"
+                      }`}
+                    >
+                      {consoleOutput}
                     </div>
                   ) : (
-                    <div>
-                      <pre className={`whitespace-pre-wrap ${isError ? "text-rose-400" : "text-emerald-300"}`}>
-                        {consoleOutput}
-                      </pre>
-                      {isError && (
-                        <div className="mt-3 p-3 rounded-xl bg-indigo-950/40 border border-indigo-700/60 flex flex-wrap items-center justify-between gap-2.5">
-                          <div className="flex items-center gap-2 text-indigo-200 text-xs font-sans">
-                            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                            <span>Mã nguồn phát hiện lỗi. Bạn muốn Gia sư AI hỗ trợ tìm nguyên nhân theo mức độ nào?</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 font-sans">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setHintLevel(1);
-                                handleSendAi("Mã nguồn của em bị lỗi khi chạy. Hãy đặt câu hỏi giúp em tự phát hiện nguyên nhân nhé!", 1);
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 text-xs font-semibold border border-indigo-700"
-                            >
-                              🔍 Mức 1: Câu hỏi
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setHintLevel(2);
-                                handleSendAi("Chương trình của em gặp lỗi. Xin hãy chỉ ra dòng lệnh và nguyên nhân gây lỗi!", 2);
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-200 text-xs font-semibold border border-amber-700"
-                            >
-                              📍 Mức 2: Vị trí lỗi
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setHintLevel(3);
-                                handleSendAi("Hãy giải thích nguyên lý và cho em một ví dụ tương tự khác nhé!", 3);
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 text-xs font-semibold border border-emerald-700"
-                            >
-                              💡 Mức 3: Giải thích & Ví dụ
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                    <div className="text-slate-500 italic pt-2">
+                      Nhấn nút "Chạy" hoặc tổ hợp phím [Ctrl + Enter] để thực thi mã nguồn. Kết quả chương trình sẽ xuất hiện tại đây.
                     </div>
                   )}
                 </div>
               )}
 
-              {activeBottomTab === "stdin" && (
-                <div className="h-full flex flex-col gap-2">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                    <span>Nhập dữ liệu giả lập cho các lệnh <code>input()</code> (mỗi dòng tương ứng 1 lần input):</span>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => setStdinInput("15 4")}
-                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-[10px] rounded text-slate-300"
-                      >
-                        Mẫu: "15 4"
-                      </button>
-                      <button
-                        onClick={() => setStdinInput("5\n1 2 3 4 5")}
-                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-[10px] rounded text-slate-300"
-                      >
-                        Mẫu mảng N=5
-                      </button>
-                    </div>
-                  </div>
+              {/* Tab 2: Standard Input (stdin) */}
+              {bottomTab === "stdin" && (
+                <div className="h-full flex flex-col">
+                  <label className="text-[11px] text-slate-400 font-sans mb-1 block">
+                    Dữ liệu nhập chuẩn cho các lệnh <code className="text-blue-300">input()</code> (mỗi lần input tương ứng một dòng):
+                  </label>
                   <textarea
                     value={stdinInput}
                     onChange={(e) => setStdinInput(e.target.value)}
-                    placeholder="Nhập dữ liệu vào đây (ví dụ: 10 20 hoặc họ tên)..."
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-amber-500 font-mono text-xs resize-none"
+                    placeholder="Ví dụ:&#10;15 4&#10;Học sinh Nguyễn Văn An"
+                    className="flex-1 w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 font-mono text-xs placeholder:text-slate-600 focus:outline-hidden focus:border-blue-500"
                   />
                 </div>
               )}
 
-              {/* Diary & Student Reflection Tab */}
-              {activeBottomTab === "diary" && (
-                <div className="font-sans space-y-4 text-xs">
-                  {/* Student Reflection Section */}
-                  <div className="p-3.5 bg-slate-900/80 border border-indigo-800/60 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <MessageSquare className="w-4 h-4 text-amber-400" />
-                        <h4 className="font-bold text-white text-sm">Phần học sinh tự giải thích quá trình sửa lỗi</h4>
-                      </div>
-                      <span className="text-[11px] text-slate-400">
-                        (Bắt buộc để giáo viên đánh giá bài làm)
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-bold text-amber-300 mb-1">
-                          1. Em gặp lỗi gì?
-                        </label>
-                        <textarea
-                          value={reflection.errorEncountered}
-                          onChange={(e) => setReflection({ ...reflection, errorEncountered: e.target.value })}
-                          placeholder="Ví dụ: Lỗi SyntaxError ở dòng 5 thiếu dấu hai chấm, hoặc vòng lặp while bị lặp vô hạn..."
-                          rows={3}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-sky-300 mb-1">
-                          2. Vì sao xảy ra lỗi?
-                        </label>
-                        <textarea
-                          value={reflection.errorReason}
-                          onChange={(e) => setReflection({ ...reflection, errorReason: e.target.value })}
-                          placeholder="Ví dụ: Do em quên cú pháp câu lệnh if phải có dấu ':', hoặc biến chạy i chưa được tăng giá trị..."
-                          rows={3}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-emerald-300 mb-1">
-                          3. Em đã sửa như thế nào?
-                        </label>
-                        <textarea
-                          value={reflection.howFixed}
-                          onChange={(e) => setReflection({ ...reflection, howFixed: e.target.value })}
-                          placeholder="Ví dụ: Em đã thêm dấu ':' vào cuối dòng 5 và thụt lề 4 dấu cách cho khối lệnh bên trong..."
-                          rows={3}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
-                      <span>Trạng thái phiên: <strong>{debugSession.runs.length}</strong> lần chạy thử | <strong>{debugSession.hints.length}</strong> lần nhận gợi ý AI</span>
-                      {onSubmitWork && (
-                        <button
-                          type="button"
-                          onClick={handleSavePractice}
-                          disabled={isSaving}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+              {/* Tab 3: Debug History & Reflection */}
+              {bottomTab === "diary" && (
+                <div className="h-full space-y-3 font-sans text-xs">
+                  {debugRuns.length === 0 ? (
+                    <p className="text-slate-500 italic">
+                      Chưa có lượt chạy nào trong phiên này. Mỗi lần bạn nhấn "Chạy", nhật ký sẽ tự động lưu lại mã nguồn và lỗi tương ứng để giúp bạn tự rút kinh nghiệm.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {debugRuns.slice(-8).reverse().map((run, idx) => (
+                        <div
+                          key={run.id || idx}
+                          className="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80 flex items-start justify-between gap-2"
                         >
-                          <Save className="w-3.5 h-3.5" />
-                          <span>{isSaving ? "Đang lưu..." : "Lưu vào hồ sơ bài nộp"}</span>
-                        </button>
-                      )}
-                    </div>
-
-                    {saveSuccess && (
-                      <div className="p-2 bg-emerald-950/80 border border-emerald-700 text-emerald-300 rounded-lg text-xs flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>✅ Đã lưu bài nộp và phiên sửa lỗi thành công! Bài đang ở trạng thái <strong>"submitted"</strong> (Chờ giáo viên chấm điểm).</span>
-                      </div>
-                    )}
-
-                    {saveError && (
-                      <div className="p-2 bg-rose-950/80 border border-rose-700 text-rose-300 rounded-lg text-xs flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                        <span>{saveError}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Run History List */}
-                  <div>
-                    <h5 className="font-bold text-slate-300 mb-2 flex items-center gap-2">
-                      <Terminal className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Lịch sử các lần chạy thử trong phiên ({debugSession.runs.length})</span>
-                    </h5>
-                    {debugSession.runs.length === 0 ? (
-                      <div className="text-slate-500 italic p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
-                        Chưa có lần chạy nào. Nhấn "Chạy thử (Run)" để bắt đầu ghi nhận tiến trình.
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
-                        {debugSession.runs.map((r, i) => (
-                          <div key={r.id || i} className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-bold text-slate-300">Lần {debugSession.runs.length - i}</span>
-                                <span className="text-[10px] text-slate-500">{r.timestamp}</span>
-                                {r.passed ? (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800">Thành công ({r.timeMs}ms)</span>
-                                ) : (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-950 text-rose-400 border border-rose-800">Có lỗi</span>
-                                )}
-                              </div>
-                              <pre className="text-[11px] text-slate-400 truncate font-mono">
-                                {r.error ? r.error.split("\n")[0] : r.output.slice(0, 100) || "(Không in kết quả)"}
-                              </pre>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-300">
+                                Lần {debugRuns.length - idx} ({run.timestamp})
+                              </span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded-sm ${
+                                  run.passed
+                                    ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
+                                    : "bg-rose-950 text-rose-400 border border-rose-800"
+                                }`}
+                              >
+                                {run.passed ? "Thành công" : "Có lỗi"}
+                              </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCode(r.code);
-                              }}
-                              className="px-2 py-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 shrink-0"
-                              title="Tải lại mã nguồn ở lần chạy này"
-                            >
-                              Khôi phục mã
-                            </button>
+                            {run.error ? (
+                              <p className="font-mono text-[11px] text-rose-400 mt-1 line-clamp-2">
+                                {run.error}
+                              </p>
+                            ) : (
+                              <p className="font-mono text-[11px] text-slate-400 mt-1 line-clamp-1">
+                                {run.output ? run.output.slice(0, 100) : "Thành công"}
+                              </p>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeBottomTab === "cheatsheet" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-slate-300 font-sans">
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 font-mono">
-                    <div className="font-bold text-amber-400 mb-1 font-sans">Nhập / Xuất dữ liệu</div>
-                    <code className="block text-[11px] text-slate-300">print("Xin chào", x)</code>
-                    <code className="block text-[11px] text-slate-300">x = input() # dạng xâu str</code>
-                    <code className="block text-[11px] text-slate-300">a = int(input()) # số nguyên</code>
-                    <code className="block text-[11px] text-slate-300">a, b = map(int, input().split())</code>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 font-mono">
-                    <div className="font-bold text-sky-400 mb-1 font-sans">Rẽ nhánh & Vòng lặp</div>
-                    <code className="block text-[11px] text-slate-300">if a &gt; 0: ... elif: ... else:</code>
-                    <code className="block text-[11px] text-slate-300">for i in range(n): ...</code>
-                    <code className="block text-[11px] text-slate-300">for i in range(1, n + 1, 2):</code>
-                    <code className="block text-[11px] text-slate-300">while dieu_kien: ...</code>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 font-mono">
-                    <div className="font-bold text-emerald-400 mb-1 font-sans">Danh sách & Hàm</div>
-                    <code className="block text-[11px] text-slate-300">a = [1, 2, 3]; a.append(4)</code>
-                    <code className="block text-[11px] text-slate-300">len(a), max(a), min(a), sum(a)</code>
-                    <code className="block text-[11px] text-slate-300">def tinh_tong(x, y): return x + y</code>
-                    <code className="block text-[11px] text-slate-300">s[::-1] # đảo ngược xâu</code>
-                  </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm("Bạn có muốn hoàn tác mã nguồn về lần chạy này?")) {
+                                setCode(run.code);
+                              }
+                            }}
+                            className="text-[11px] text-blue-400 hover:text-blue-300 underline cursor-pointer shrink-0"
+                          >
+                            Khôi phục mã
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Right Sidebar: AI Tutor */}
-        {isAiOpen && (
-          <aside className="w-80 md:w-96 border-l border-slate-800 bg-slate-900/95 flex flex-col shrink-0 z-10">
-            <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-                  <Bot className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-black text-white">Gia Sư AI Python</h3>
-                  <p className="text-[10px] text-indigo-300">Hỗ trợ tự sửa lỗi theo 3 mức độ</p>
-                </div>
+        {/* RIGHT COLUMN: AI TUTOR PANEL (Desktop fixed 380px or mobile sheet) */}
+        <div
+          className={`${
+            mobileTab === "ai"
+              ? "flex flex-1"
+              : isAiOpen
+              ? "hidden md:flex w-full md:w-[380px] lg:w-[400px]"
+              : "hidden"
+          } flex-col bg-slate-950 border-l border-slate-800 shrink-0 z-10 overflow-hidden`}
+        >
+          {/* AI Header */}
+          <div className="h-10 px-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center">
+                <Bot className="w-3.5 h-3.5" />
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAiMessages([
-                      {
-                        id: Date.now().toString(),
-                        role: "assistant",
-                        content: `Hội thoại đã được làm mới. Bạn cần Gia sư AI hỗ trợ gì về mã nguồn Python này?`,
-                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                      }
-                    ]);
-                  }}
-                  className="text-slate-400 hover:text-white p-1 rounded-md text-[11px] hover:bg-slate-800 transition-colors"
-                  title="Làm mới cuộc trò chuyện"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setIsAiOpen(false)}
-                  className="text-slate-400 hover:text-white p-1 rounded-md text-xs hover:bg-slate-800 transition-colors"
-                  title="Đóng bảng Gia sư AI"
-                >
-                  ✕
-                </button>
-              </div>
+              <span className="text-xs font-semibold text-white">Gia sư AI Tin học</span>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAiOpen(false);
+                if (mobileTab === "ai") setMobileTab("code");
+              }}
+              className="text-slate-400 hover:text-slate-200 p-1 rounded-md"
+              title="Đóng bảng AI"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
 
-            {/* 3-Level Hint Selector Controls */}
-            <div className="p-2 border-b border-slate-800 bg-slate-950/70">
-              <div className="text-[10px] font-bold text-slate-400 mb-1.5 flex items-center justify-between">
-                <span>Chọn mức độ trợ giúp sư phạm:</span>
-                <span className="text-indigo-400 font-semibold">Mức {hintLevel}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setHintLevel(1)}
-                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all border ${
-                    hintLevel === 1
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800"
-                  }`}
-                  title="Mức 1: Đặt câu hỏi Socratic giúp học sinh tự nhận ra lỗi"
-                >
-                  🔍 Mức 1: Câu hỏi
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHintLevel(2)}
-                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all border ${
-                    hintLevel === 2
-                      ? "bg-amber-600 text-white border-amber-500 shadow-sm"
-                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800"
-                  }`}
-                  title="Mức 2: Chỉ ra vị trí dòng lệnh và nguyên nhân gây lỗi"
-                >
-                  📍 Mức 2: Vị trí lỗi
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHintLevel(3)}
-                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all border ${
-                    hintLevel === 3
-                      ? "bg-emerald-600 text-white border-emerald-500 shadow-sm"
-                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800"
-                  }`}
-                  title="Mức 3: Giải thích nguyên lý và cho ví dụ tương tự"
-                >
-                  💡 Mức 3: Ví dụ
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Prompt Suggestions */}
-            <div className="p-2 border-b border-slate-800 bg-slate-950/40 flex flex-wrap gap-1.5">
+          {/* AI Hint Level Selector (Requirement 4: 3 Levels) */}
+          <div className="p-2.5 bg-slate-900/60 border-b border-slate-800 shrink-0">
+            <span className="text-[11px] text-slate-400 block mb-1.5 font-medium">
+              Cấp độ hướng dẫn Socratic:
+            </span>
+            <div className="grid grid-cols-3 gap-1 text-[11px]">
               <button
-                onClick={() => handleSendAi(`Hãy hướng dẫn mình tìm lỗi trong đoạn mã này theo Hướng dẫn Mức ${hintLevel}.`, hintLevel)}
-                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-indigo-950/80 text-indigo-300 border border-indigo-800 hover:bg-indigo-900 transition-colors"
+                type="button"
+                onClick={() => setHintLevel(1)}
+                className={`py-1.5 px-2 rounded-md font-medium transition-colors text-center cursor-pointer ${
+                  hintLevel === 1
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                }`}
+                title="Mức 1: Đặt câu hỏi dẫn dắt học sinh tự quan sát"
               >
-                🐛 Tìm lỗi (Mức {hintLevel})
+                Mức 1 (Gợi mở)
               </button>
               <button
-                onClick={() => handleSendAi("Hãy giải thích ý nghĩa các khối lệnh trong mã nguồn này giúp mình một cách ngắn gọn, dễ hiểu.", 3)}
-                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-sky-950/80 text-sky-300 border border-sky-800 hover:bg-sky-900 transition-colors"
+                type="button"
+                onClick={() => setHintLevel(2)}
+                className={`py-1.5 px-2 rounded-md font-medium transition-colors text-center cursor-pointer ${
+                  hintLevel === 2
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                }`}
+                title="Mức 2: Chỉ rõ vị trí và giải thích nguyên nhân lỗi"
               >
-                📖 Giải thích code
+                Mức 2 (Vị trí lỗi)
               </button>
               <button
-                onClick={() => handleSendAi("Gợi ý cách tối ưu thuật toán hoặc cách viết ngắn gọn chuẩn Python hơn mà không làm mất tính dễ đọc.", hintLevel)}
-                className="px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 transition-colors"
+                type="button"
+                onClick={() => setHintLevel(3)}
+                className={`py-1.5 px-2 rounded-md font-medium transition-colors text-center cursor-pointer ${
+                  hintLevel === 3
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                }`}
+                title="Mức 3: Giải thích nguyên lý & ví dụ tương tự"
               >
-                ⚡ Tối ưu code
+                Mức 3 (Ví dụ mẫu)
               </button>
             </div>
+          </div>
 
-            {/* Chat Messages */}
-            <div className="flex-1 p-3 overflow-y-auto space-y-3 text-xs">
-              {aiMessages.map((msg) => (
+          {/* Quick Guidance Prompts */}
+          {isError && (
+            <div className="p-2 bg-rose-950/40 border-b border-rose-900/50 shrink-0 flex items-center justify-between">
+              <span className="text-[11px] text-rose-300 truncate">
+                Chương trình vừa gặp lỗi khi chạy.
+              </span>
+              <button
+                type="button"
+                onClick={() => handleSendAi(`Em đang gặp lỗi trong chương trình. Nhờ thầy/cô hướng dẫn theo Mức ${hintLevel}!`)}
+                className="text-[11px] font-semibold text-rose-300 hover:text-white bg-rose-900/80 px-2 py-0.5 rounded-md cursor-pointer shrink-0"
+              >
+                Nhờ AI phân tích lỗi →
+              </button>
+            </div>
+          )}
+
+          {/* Chat Messages Log */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 select-text">
+            {aiMessages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex flex-col ${
+                  msg.role === "user" ? "items-end" : "items-start"
+                }`}
+              >
                 <div
-                  key={msg.id}
-                  className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
+                  className={`max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-blue-600 text-white rounded-tr-none"
+                      : "bg-slate-900 text-slate-200 border border-slate-800 rounded-tl-none prose-invert"
+                  }`}
                 >
-                  <div
-                    className={`max-w-[90%] rounded-2xl p-3 leading-relaxed ${
-                      msg.role === "user"
-                        ? "bg-indigo-600 text-white rounded-tr-xs"
-                        : "bg-slate-800 text-slate-200 border border-slate-700/80 rounded-tl-xs shadow-md"
-                    }`}
-                  >
-                    <div className="markdown-body">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                    <span className="text-[9px] opacity-50 mt-1.5 block text-right">
-                      {msg.timestamp}
-                    </span>
-                  </div>
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
-              ))}
-
-              {isAiThinking && (
-                <div className="flex items-center gap-2 text-indigo-400 text-xs p-2 bg-slate-800/60 rounded-xl w-fit border border-slate-700/60 animate-pulse">
-                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
-                  <span>Gia sư AI đang phân tích mã nguồn theo Mức {hintLevel}...</span>
-                </div>
-              )}
-
-              {/* Error & Retry Banner */}
-              {aiErrorState && (
-                <div className="p-3 bg-rose-950/80 border border-rose-700/80 rounded-xl text-rose-200 text-xs space-y-2">
-                  <p className="font-semibold">{aiErrorState.message}</p>
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleSendAi(aiErrorState.lastPrompt, hintLevel)}
-                      className="px-2.5 py-1 bg-rose-700 hover:bg-rose-600 text-white rounded font-bold text-[11px] flex items-center gap-1"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Thử lại</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleInstantFallbackHint(hintLevel)}
-                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded font-bold text-[11px] border border-amber-600/50"
-                    >
-                      💡 Xem gợi ý có sẵn
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div ref={aiBottomRef} />
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-3 border-t border-slate-800 bg-slate-900">
-              <div className="flex items-center gap-1.5 bg-slate-950 rounded-xl border border-slate-800 p-1.5 focus-within:border-indigo-500 transition-colors">
-                <input
-                  type="text"
-                  value={aiInput}
-                  onChange={(e) => setAiInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendAi();
-                    }
-                  }}
-                  placeholder={`Hỏi Gia sư AI (Đang áp dụng Mức ${hintLevel})...`}
-                  className="flex-1 bg-transparent px-2 text-xs text-white placeholder-slate-500 focus:outline-none"
-                />
-                <button
-                  onClick={() => handleSendAi()}
-                  disabled={!aiInput.trim() || isAiThinking}
-                  className="p-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg transition-colors"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
+                <span className="text-[10px] text-slate-500 mt-1 px-1">
+                  {msg.timestamp}
+                </span>
               </div>
-            </div>
-          </aside>
-        )}
+            ))}
+
+            {isAiThinking && (
+              <div className="flex items-center gap-2 text-xs text-blue-400 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Gia sư AI đang đọc mã nguồn và phân tích gợi ý...</span>
+              </div>
+            )}
+            <div ref={aiBottomRef} />
+          </div>
+
+          {/* Chat Input Box (Fixed at bottom, keyboard safe) */}
+          <div className="p-3 bg-slate-900 border-t border-slate-800 shrink-0">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendAi();
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                placeholder="Hỏi gia sư AI về lỗi hoặc thuật toán..."
+                disabled={isAiThinking}
+                className="flex-1 h-9 px-3 rounded-lg bg-slate-950 border border-slate-700 text-slate-200 placeholder:text-slate-500 text-xs focus:outline-hidden focus:border-blue-500"
+              />
+              <button
+                type="submit"
+                disabled={!aiInput.trim() || isAiThinking}
+                className="h-9 w-9 rounded-lg bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center cursor-pointer disabled:opacity-40 shrink-0"
+                title="Gửi câu hỏi"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
 
-      {/* Compatibility Notice Modal */}
-      {showCompatModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Info className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-base text-white">Giới Hạn & Tương Thích Môi Trường Python</h3>
+      {/* 3. LESSON CATALOG MODAL (Choose from Teacher Assignments or Free Practice) */}
+      {isLessonCatalogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+              <div>
+                <h2 className="text-sm font-bold text-white">Danh mục bài thực hành Python</h2>
+                <p className="text-xs text-slate-400">Chọn bài được giao hoặc chuyển sang thực hành tự do</p>
               </div>
               <button
-                onClick={() => setShowCompatModal(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                type="button"
+                onClick={() => setIsLessonCatalogOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs text-slate-300">
-              <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
-                <div className="font-bold text-white mb-1">Bộ máy thực thi:</div>
-                <div className="text-emerald-400 font-mono">{PYTHON_RUNTIME_COMPATIBILITY_INFO.engineName} ({PYTHON_RUNTIME_COMPATIBILITY_INFO.version})</div>
-              </div>
-
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+              {/* Option 1: Free Practice */}
               <div>
-                <div className="font-bold text-emerald-400 mb-1 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Tính năng hỗ trợ đầy đủ:</span>
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                  Chế độ tự do
+                </span>
+                <div
+                  onClick={() => handleSwitchToLesson(null)}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                    currentLesson === null
+                      ? "bg-blue-950/50 border-blue-600 text-white"
+                      : "bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300"
+                  }`}
+                >
+                  <div>
+                    <h3 className="text-xs font-semibold">Thực hành Python tự do</h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Khung soạn thảo tự do, không ràng buộc đề bài hay nộp bài.
+                    </p>
+                  </div>
+                  {currentLesson === null && <Check className="w-4 h-4 text-blue-400" />}
                 </div>
-                <ul className="list-disc list-inside space-y-0.5 text-slate-300 pl-1">
-                  {PYTHON_RUNTIME_COMPATIBILITY_INFO.supportedFeatures.map((item, idx) => (
-                    <li key={idx}>{item}</li>
-                  ))}
-                </ul>
               </div>
 
+              {/* Option 2: Teacher Assigned Lessons */}
+              {availableLessons.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                    Bài tập giáo viên giao ({availableLessons.length})
+                  </span>
+                  <div className="space-y-2">
+                    {availableLessons.map((l) => (
+                      <div
+                        key={l.id}
+                        onClick={() => handleSwitchToLesson(l)}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                          currentLesson?.id === l.id
+                            ? "bg-blue-950/50 border-blue-600 text-white"
+                            : "bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300"
+                        }`}
+                      >
+                        <div className="min-w-0 pr-2">
+                          <h3 className="text-xs font-semibold truncate">{l.title}</h3>
+                          <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">
+                            {l.description || "Bài tập lập trình Python"}
+                          </p>
+                        </div>
+                        {currentLesson?.id === l.id && <Check className="w-4 h-4 text-blue-400 shrink-0" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Option 3: Reference Curriculum Topics */}
               <div>
-                <div className="font-bold text-rose-400 mb-1 flex items-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>Các tính năng & thư viện chưa hỗ trợ:</span>
-                </div>
-                <ul className="list-disc list-inside space-y-0.5 text-slate-400 pl-1">
-                  {PYTHON_RUNTIME_COMPATIBILITY_INFO.unsupportedFeatures.map((item, idx) => (
-                    <li key={idx}>{item}</li>
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                  Chủ đề mẫu GDPT 2018 tham khảo
+                </span>
+                <div className="space-y-2">
+                  {REFERENCE_PYTHON_TOPICS.map((ref) => (
+                    <div
+                      key={ref.id}
+                      onClick={() => {
+                        const tempLesson: Lesson = {
+                          id: ref.id,
+                          title: ref.title,
+                          description: ref.description,
+                          starterCode: ref.code,
+                          level: "middle",
+                          moduleType: "coding",
+                          durationMinutes: 45,
+                          createdAt: new Date().toISOString(),
+                        };
+                        handleSwitchToLesson(tempLesson);
+                      }}
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                        currentLesson?.id === ref.id
+                          ? "bg-blue-950/50 border-blue-600 text-white"
+                          : "bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300"
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <span className="text-[10px] text-blue-400 block">{ref.category}</span>
+                        <h4 className="text-xs font-semibold truncate">{ref.title}</h4>
+                      </div>
+                      {currentLesson?.id === ref.id && <Check className="w-4 h-4 text-blue-400 shrink-0" />}
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
-
-              <div className="p-2.5 bg-amber-950/40 border border-amber-700/60 rounded-xl text-amber-200">
-                <strong>Giới hạn an toàn:</strong> Thời gian chạy tối đa {PYTHON_RUNTIME_COMPATIBILITY_INFO.limits.maxExecutionTimeMs / 1000}s (ngăn chặn vòng lặp vô hạn làm đơ máy), giới hạn đầu ra {PYTHON_RUNTIME_COMPATIBILITY_INFO.limits.maxOutputChars.toLocaleString()} ký tự.
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-2 border-t border-slate-800">
-              <button
-                onClick={() => setShowCompatModal(false)}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold"
-              >
-                Đã hiểu
-              </button>
             </div>
           </div>
         </div>
       )}
-        </>
+
+      {/* 4. SYNTAX CHEATSHEET SLIDE-OVER (Requirement 2) */}
+      {isCheatsheetOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-slate-900 border-l border-slate-800 h-full flex flex-col p-4 shadow-2xl animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-amber-400" />
+                <h2 className="text-sm font-bold text-white">Sổ tay cú pháp Python 3</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCheatsheetOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1 select-text">
+              {SYNTAX_CHEATSHEET.map((cat, idx) => (
+                <div key={idx} className="space-y-2">
+                  <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+                    {cat.category}
+                  </h3>
+                  <div className="space-y-2">
+                    {cat.items.map((item, itemIdx) => (
+                      <div
+                        key={itemIdx}
+                        className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-semibold text-slate-200">{item.title}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(item.code);
+                              alert("Đã sao chép đoạn mã!");
+                            }}
+                            className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>Chép</span>
+                          </button>
+                        </div>
+                        <pre className="font-mono text-[11px] bg-slate-900 p-2 rounded-md text-emerald-300 overflow-x-auto whitespace-pre">
+                          {item.code}
+                        </pre>
+                        {item.note && (
+                          <p className="text-[11px] text-slate-400 mt-1 leading-normal italic">
+                            💡 {item.note}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
 };
-

@@ -201,11 +201,36 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
         }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const textSample = await res.text().catch(() => "");
+        const isHtml = textSample.trim().startsWith("<") || contentType.includes("text/html");
+        throw new Error(
+          isHtml
+            ? `Máy chủ trả về trang HTML thay vì JSON (HTTP ${res.status}). Vui lòng đảm bảo backend server.ts đang chạy.`
+            : `Định dạng phản hồi không hợp lệ (${contentType.split(";")[0] || "unknown"}, HTTP ${res.status}).`
+        );
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error("Không thể phân tích dữ liệu JSON phản hồi từ máy chủ.");
+      }
+
+      if (!res.ok) {
+        throw new Error(data?.error || `Lỗi máy chủ (${res.status})`);
+      }
+
+      if (!data || typeof data !== "object" || typeof data.text !== "string" || !data.text.trim()) {
+        throw new Error(data?.error || "Phản hồi từ AI không đúng cấu trúc.");
+      }
+
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: data.text || "Mình chưa thể phản hồi lúc này, bạn thử hỏi lại nhé.",
+        content: data.text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
@@ -216,7 +241,7 @@ Khi bạn gặp khó khăn trong việc tư duy thuật toán hoặc bị lỗi 
         {
           id: (Date.now() + 1).toString(),
           role: "assistant",
-          content: "⚠️ Không thể kết nối tới Trợ lý AI. Vui lòng kiểm tra lại đường truyền mạng.",
+          content: `⚠️ Lỗi kết nối AI: ${err?.message || "Không thể kết nối tới Trợ lý AI. Vui lòng kiểm tra lại đường truyền mạng."}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);

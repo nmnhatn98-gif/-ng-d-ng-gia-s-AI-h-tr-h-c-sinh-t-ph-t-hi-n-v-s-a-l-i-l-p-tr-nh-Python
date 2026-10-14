@@ -29,11 +29,21 @@
         "teacherId": {
           "type": "string"
         },
+        "ownerUid": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "deleted"]
+        },
+        "deletedAt": {
+          "type": "string"
+        },
         "description": {
           "type": "string"
         }
       },
-      "required": ["name", "teacherId"]
+      "required": ["name"]
     },
     "Lesson": {
       "title": "Lesson",

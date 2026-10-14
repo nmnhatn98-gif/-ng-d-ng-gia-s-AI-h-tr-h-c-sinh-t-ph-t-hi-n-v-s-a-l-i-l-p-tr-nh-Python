@@ -271,11 +271,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <Code2 className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-900 tracking-tight">
-              LMS Tin Học & STEM
+            <h2 className="text-base font-bold text-slate-900 tracking-tight leading-none">
+              CodeHiểu
             </h2>
-            <p className="text-xs text-slate-500">
-              {portal === "student" ? "Đăng nhập học sinh" : "Cổng Giáo viên"}
+            <p className="text-xs text-blue-600 font-medium mt-0.5">
+              Học Python cùng gia sư AI
             </p>
           </div>
         </div>

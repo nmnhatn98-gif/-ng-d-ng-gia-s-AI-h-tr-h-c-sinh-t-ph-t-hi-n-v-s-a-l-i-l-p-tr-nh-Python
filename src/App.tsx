@@ -961,7 +961,7 @@ export function App() {
               Chế độ Khách (Xem trước)
             </span>
             <span className="text-slate-300">
-              Trải nghiệm hệ thống STEM Tin học. Đăng nhập để nộp bài và lưu điểm.
+              Trải nghiệm CodeHiểu: Học Python cùng gia sư AI. Đăng nhập để nộp bài và lưu điểm.
             </span>
           </div>
           <button

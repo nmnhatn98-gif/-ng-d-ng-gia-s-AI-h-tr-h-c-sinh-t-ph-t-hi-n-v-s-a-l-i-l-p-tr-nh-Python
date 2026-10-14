@@ -62,7 +62,7 @@ const REFERENCE_PYTHON_TOPICS = [
     id: "ref_input_output",
     title: "1. Nhập xuất cơ bản & f-string",
     category: "Cơ bản",
-    code: `# Nhập tên và lớp từ bàn phím\nten = input("Nhập họ tên của bạn: ")\nlop = input("Nhập lớp học của bạn: ")\n\nprint("-" * 35)\nprint(f"Xin chào {ten} đến với Tin Học & STEM!")\nprint(f"Chúc bạn học tập thật tốt tại {lop}.")\nprint("-" * 35)\n`,
+    code: `# Nhập tên và lớp từ bàn phím\nten = input("Nhập họ tên của bạn: ")\nlop = input("Nhập lớp học của bạn: ")\n\nprint("-" * 35)\nprint(f"Xin chào {ten} đến với CodeHiểu!")\nprint(f"Chúc bạn học tập thật tốt tại {lop}.")\nprint("-" * 35)\n`,
     sampleInput: "Nguyễn Văn An\nLớp 10A1",
     description: "Làm quen với các hàm cơ bản print(), input() và định dạng chuỗi f-string.",
   },
@@ -1164,7 +1164,7 @@ export const PythonLabModule: React.FC<PythonLabModuleProps> = ({
               <div className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center">
                 <Bot className="w-3.5 h-3.5" />
               </div>
-              <span className="text-xs font-semibold text-white">Gia sư AI Tin học</span>
+              <span className="text-xs font-semibold text-white">Gia sư AI CodeHiểu</span>
             </div>
             <button
               type="button"

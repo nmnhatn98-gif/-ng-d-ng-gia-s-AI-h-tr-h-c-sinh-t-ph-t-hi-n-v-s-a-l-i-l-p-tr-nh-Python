@@ -119,9 +119,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs shrink-0">
                 <Code2 className="w-5 h-5" />
               </div>
-              <span className="font-bold text-base text-slate-900 tracking-tight">
-                STEM Tin học
-              </span>
+              <div className="flex flex-col">
+                <span className="font-bold text-base text-slate-900 tracking-tight leading-none">
+                  CodeHiểu
+                </span>
+                <span className="hidden sm:inline text-[11px] text-blue-600 font-medium tracking-tight mt-0.5 leading-none">
+                  Học Python cùng gia sư AI
+                </span>
+              </div>
             </div>
           </div>
 
@@ -511,10 +516,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="relative w-72 max-w-[85vw] bg-white text-slate-900 flex flex-col h-full z-10 shadow-2xl p-4 overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-xs">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-xs shrink-0">
                   <Code2 className="w-4 h-4" />
                 </div>
-                <span className="font-bold text-sm text-slate-900">STEM Tin học</span>
+                <div className="flex flex-col">
+                  <span className="font-bold text-sm text-slate-900 leading-none">CodeHiểu</span>
+                  <span className="text-[10px] text-blue-600 font-medium leading-none mt-0.5">Học Python cùng gia sư AI</span>
+                </div>
               </div>
               <button
                 type="button"

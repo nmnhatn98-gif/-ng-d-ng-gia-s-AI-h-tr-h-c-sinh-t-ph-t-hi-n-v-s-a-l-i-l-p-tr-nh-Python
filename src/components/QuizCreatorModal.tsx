@@ -266,7 +266,7 @@ export const QuizCreatorModal: React.FC<QuizCreatorModalProps> = ({
             </div>
             <div>
               <h2 className="font-black text-slate-900 text-base sm:text-lg tracking-tight flex items-center gap-2">
-                <span>Hệ Thống Biên Soạn Trắc Nghiệm Tin Học & STEM</span>
+                <span>Biên Soạn Trắc Nghiệm - CodeHiểu</span>
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                   AI & Thủ công
                 </span>

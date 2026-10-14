@@ -1,6 +1,6 @@
 {
-  "name": "LMS Tin Học & STEM",
-  "description": "Hệ thống quản lý học tập môn Tin học và STEM đa cấp học, hỗ trợ lập trình C++/Python, dự án Robotics, và tích hợp AI Assistant (Gemini).",
+  "name": "CodeHiểu: Học Python cùng gia sư AI",
+  "description": "CodeHiểu: Ứng dụng gia sư AI hỗ trợ học sinh tự phát hiện và sửa lỗi lập trình Python. Hiểu từng dòng mã – Tự tin sửa từng lỗi.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

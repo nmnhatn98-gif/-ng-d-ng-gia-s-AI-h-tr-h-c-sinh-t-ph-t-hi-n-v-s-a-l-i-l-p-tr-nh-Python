@@ -293,10 +293,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           <Code2 className="w-6 h-6" />
         </div>
         <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-          LMS Tin Học & STEM
+          CodeHiểu
         </h1>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Hệ thống thực hành lập trình và học tập trực tuyến
+        <p className="text-xs text-blue-600 font-medium mt-0.5">
+          Học Python cùng gia sư AI
+        </p>
+        <p className="text-[11px] text-slate-500 mt-1">
+          Hiểu từng dòng mã – Tự tin sửa từng lỗi
         </p>
       </div>
 
@@ -862,7 +865,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
       {/* Footer text */}
       <div className="w-full max-w-[440px] text-center mt-5 text-[11px] text-slate-400">
-        STEM & Tin Học 2026 · Bảo mật tài khoản GDPT 2018
+        CodeHiểu 2026 · Nền tảng học Python cùng gia sư AI
       </div>
     </div>
   );

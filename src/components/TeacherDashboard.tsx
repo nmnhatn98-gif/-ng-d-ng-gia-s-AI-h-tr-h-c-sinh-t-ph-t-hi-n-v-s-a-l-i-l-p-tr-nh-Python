@@ -553,17 +553,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
           {!sidebarCollapsed ? (
             <div className="flex items-center gap-3 overflow-hidden">
-              <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-base shadow-sm">
-                AI
+              <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm shrink-0">
+                <Code2 className="w-5 h-5" />
               </div>
               <div className="truncate">
-                <div className="font-bold text-white text-sm tracking-tight leading-none">LMS Tin Học</div>
-                <div className="text-[11px] text-slate-400 mt-1">Gia Sư Python AI</div>
+                <div className="font-bold text-white text-sm tracking-tight leading-none">CodeHiểu</div>
+                <div className="text-[11px] text-blue-400 font-medium mt-1">Học Python cùng gia sư AI</div>
               </div>
             </div>
           ) : (
-            <div className="mx-auto w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-sm">
-              AI
+            <div className="mx-auto w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0" title="CodeHiểu">
+              <Code2 className="w-5 h-5" />
             </div>
           )}
           <button

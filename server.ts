@@ -1694,7 +1694,7 @@ app.get("/api/system/storage-status", (req, res) => {
 
 // Health Check Endpoint
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "LMS Tin Học & STEM" });
+  res.json({ status: "ok", service: "CodeHiểu: Học Python cùng gia sư AI" });
 });
 
 // Lazy initialize Gemini client
@@ -1739,8 +1739,15 @@ async function callGeminiGenerate(ai: GoogleGenAI, options: {
   temperature?: number;
   timeoutMs?: number;
 }): Promise<string> {
-  const preferredModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
-  const candidateModels = Array.from(new Set([preferredModel, "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]));
+  const preferredModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const candidateModels = Array.from(new Set([
+    preferredModel,
+    "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
+  ]));
   const timeoutMs = options.timeoutMs || 8000;
 
   let lastError: any = null;
@@ -1780,9 +1787,10 @@ async function callGeminiGenerate(ai: GoogleGenAI, options: {
       const errMsg = err?.message || String(err);
       const isQuotaExhausted = errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded") || errMsg.includes("429");
       const isNotFound = err?.status === 404 || errMsg.includes("404") || errMsg.includes("is not found") || errMsg.includes("is no longer available");
+      const isUnavailable = err?.status === 503 || errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("Overloaded");
 
-      if (isQuotaExhausted || isNotFound) {
-        console.warn(`[Gemini SDK] Model ${model} unavailable (${isQuotaExhausted ? "quota exhausted" : "not found"}). Switching to next candidate...`);
+      if (isQuotaExhausted || isNotFound || isUnavailable) {
+        console.warn(`[Gemini SDK] Model ${model} unavailable (${isUnavailable ? "service unavailable/high demand" : isQuotaExhausted ? "quota exhausted" : "not found"}). Switching to next candidate...`);
         continue;
       }
 
